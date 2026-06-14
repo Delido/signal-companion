@@ -10,12 +10,41 @@ plugins subpackage must be collected).
 import importlib
 import logging
 import pkgutil
+import sys
 
 from . import config as config_mod
 from . import audio
 from . import devices as devices_mod
 from .events import EventBus
 from .plugin import Plugin, PluginContext
+
+
+def _iter_plugin_module_names(plugins_pkg):
+    """Immediate submodule names of the plugins package.
+
+    From source, pkgutil.iter_modules walks the on-disk package. In a
+    PyInstaller frozen build the plugin modules live in the embedded PYZ
+    (not on disk), so pkgutil.iter_modules can come up empty; fall back to
+    the frozen archive's table of contents in that case.
+    """
+    names = [mi.name for mi in pkgutil.iter_modules(plugins_pkg.__path__)
+             if not mi.name.startswith("_")]
+    if names or not getattr(sys, "frozen", False):
+        return names
+
+    # ── frozen fallback: read the PyInstaller PYZ prefix tree ──
+    try:
+        import pyimod02_importers  # PyInstaller bootstrap module
+        tree = pyimod02_importers.get_pyz_toc_tree()
+        for part in plugins_pkg.__name__.split("."):
+            tree = tree.get(part, {})
+            if not isinstance(tree, dict):
+                tree = {}
+                break
+        return sorted(k for k in tree if not k.startswith("_"))
+    except Exception:
+        logging.exception("[manager] frozen plugin enumeration failed")
+        return []
 
 
 class PluginManager:
@@ -33,10 +62,12 @@ class PluginManager:
     def discover(self):
         import signal_companion.plugins as plugins_pkg
 
-        for mod_info in pkgutil.iter_modules(plugins_pkg.__path__):
-            if mod_info.name.startswith("_"):
-                continue
-            full = f"signal_companion.plugins.{mod_info.name}"
+        names = _iter_plugin_module_names(plugins_pkg)
+        if not names:
+            logging.warning("[manager] no plugin modules discovered "
+                            f"(frozen={getattr(sys, 'frozen', False)})")
+        for name in names:
+            full = f"signal_companion.plugins.{name}"
             try:
                 module = importlib.import_module(full)
                 plugin = self._instantiate(module)

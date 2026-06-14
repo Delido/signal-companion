@@ -42,7 +42,12 @@ def run():
     theme = cfg["app"].get("theme", "darkly")
 
     if _HAS_TB:
-        root = tb.Window(themename=theme if theme in tb.Style().theme_names() else "darkly")
+        # Create the themed window first, THEN consult its Style for the theme
+        # list. Calling tb.Style() before any root exists spawns a stray empty
+        # "tk" window (it creates a default Tk root).
+        root = tb.Window(themename="darkly")
+        if theme != "darkly" and theme in root.style.theme_names():
+            root.style.theme_use(theme)
     else:
         root = tk.Tk()
     root.title("SignalCompanion — Settings")
@@ -61,7 +66,8 @@ def run():
         theme_box.pack(side=tk.RIGHT)
         ttk.Label(theme_box, text="Theme:").pack(side=tk.LEFT, padx=(0, 6))
         theme_var = tk.StringVar(value=theme)
-        choices = sorted(set(_THEME_CHOICES) & set(tb.Style().theme_names())) or list(tb.Style().theme_names())
+        theme_names = root.style.theme_names()
+        choices = sorted(set(_THEME_CHOICES) & set(theme_names)) or list(theme_names)
         theme_combo = ttk.Combobox(theme_box, textvariable=theme_var, values=choices,
                                    state="readonly", width=12)
         theme_combo.pack(side=tk.LEFT)
