@@ -7,3 +7,4 @@ pywinusb           # HID access (keyboard/headset)
 pycaw              # Windows audio endpoint control (mic mute/drift)
 comtypes           # COM bindings used by pycaw
 ttkbootstrap       # modern themed settings UI (falls back to plain ttk if absent)
+cryptography       # local CA + cert for the CS2 effect's HTTPS bridge

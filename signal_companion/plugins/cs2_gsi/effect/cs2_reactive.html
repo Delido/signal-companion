@@ -51,22 +51,16 @@
     // CAN read a file that sits next to it. SignalCompanion writes the latest
     // game state to cs2_state.json in the SignalRGB Effects folder; we read it
     // with a relative URL.
+    // SignalCompanion serves the state over HTTPS on localhost. http/localhost
+    // is mixed-content blocked from this https effect origin, and a public->
+    // private fetch is Private-Network gated; the companion's TLS bridge solves
+    // both (cert trusted via Ultralight's cacert.pem + PNA header). Needs a
+    // SignalRGB restart once after SignalCompanion first patches the cert.
     try {
-      if (typeof fetch === "function") {
-        fetch("cs2_state.json", { cache: "no-store" })
-          .then(function (r) { return r.json(); })
-          .then(applyState)
-          .catch(function () {});
-      } else if (typeof XMLHttpRequest === "function") {
-        var x = new XMLHttpRequest();
-        x.open("GET", "cs2_state.json", true);
-        x.onreadystatechange = function () {
-          if (x.readyState === 4 && (x.status === 200 || x.status === 0)) {
-            try { applyState(JSON.parse(x.responseText)); } catch (e) {}
-          }
-        };
-        x.send();
-      }
+      fetch("https://127.0.0.1:3443/state", { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(applyState)
+        .catch(function () { /* bridge down / not yet trusted → stay idle */ });
     } catch (e) {}
   }
 

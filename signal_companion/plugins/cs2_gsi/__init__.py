@@ -23,34 +23,26 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from signal_companion.core import config as config_mod
 from signal_companion.core.plugin import Plugin
+from . import tls_bridge
 from .cfg_installer import install_gsi_cfg, uninstall_gsi_cfg, locate_cs2_cfg_dir
 from .effect_installer import install_effect, uninstall_effect, locate_effects_dir
 
-# The SignalRGB effect sandbox blocks network fetch, but an effect CAN read a
-# file next to itself. So we publish the latest state to this file in the
-# Effects folder and the effect reads it relatively (cs2_state.json).
-STATE_FILE_NAME = "cs2_state.json"
-
-
-def write_state_file(effects_dir, state):
-    """Atomically write `state` to cs2_state.json in `effects_dir`."""
-    if not effects_dir:
-        return
-    try:
-        d = Path(effects_dir)
-        d.mkdir(parents=True, exist_ok=True)
-        dest = d / STATE_FILE_NAME
-        tmp = d / (STATE_FILE_NAME + ".tmp")
-        tmp.write_text(json.dumps(state), encoding="utf-8")
-        os.replace(tmp, dest)
-    except Exception:
-        logging.debug("[cs2] could not write state file", exc_info=True)
+# The SignalRGB effect runs in Ultralight from a public https origin and can't
+# reach plain-HTTP localhost. tls_bridge serves /state over HTTPS (CA trusted
+# via Ultralight's cacert.pem + Private Network Access header) so the effect can
+# read it. CS2 itself still POSTs to the plain-HTTP receiver below.
 
 # Shared latest-state, guarded by a lock. The HTTP handler writes it from the
 # server thread; GET /state and the EventBus publish read it.
 _state_lock = threading.Lock()
 _latest_state = {"connected": False, "ts": 0}
+
+
+def _snapshot_state():
+    with _state_lock:
+        return dict(_latest_state)
 
 
 def _parse_gsi(payload):
@@ -194,15 +186,16 @@ class Cs2GsiPlugin(Plugin):
     def __init__(self):
         self.ctx = None
         self.server = None
+        self.https = None
         self._idle_thread = None
         self._stop = threading.Event()
-        self._effects_dir = None
 
     def default_config(self):
         return {
             "enabled": True,
             "host": "127.0.0.1",
             "port": 3000,
+            "https_port": 3443,       # HTTPS port the SignalRGB effect reads
             "auth_token": "signalcompanion",
             "cfg_dir": "",            # blank = auto-locate the CS2 cfg folder
         }
@@ -214,24 +207,40 @@ class Cs2GsiPlugin(Plugin):
             ctx.log.info("disabled")
             return
         _Handler.auth_token = cfg.get("auth_token", "signalcompanion")
-        # Where the SignalRGB effect reads its state file from.
-        try:
-            self._effects_dir = str(locate_effects_dir())
-        except Exception:
-            self._effects_dir = None
-        # Seed an initial file so the effect has something to read immediately.
-        write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
         self.server = GsiServer(cfg.get("host", "127.0.0.1"), int(cfg.get("port", 3000)),
                                 on_state=self._on_state)
         self.server.start()
+        # HTTPS bridge so the SignalRGB effect (Ultralight, public https origin)
+        # can read /state — see tls_bridge for why http/localhost is blocked.
+        self._start_https_bridge(cfg)
         # Watchdog: flip to "connected: false" if CS2 stops POSTing (game closed).
         self._idle_thread = threading.Thread(target=self._idle_watch, daemon=True,
                                               name="CS2IdleWatch")
         self._idle_thread.start()
 
+    def _start_https_bridge(self, cfg):
+        if not tls_bridge.available():
+            self.ctx.log.warning("cryptography not available — SignalRGB HTTPS bridge disabled "
+                                 "(effect can't read state)")
+            return
+        try:
+            info = tls_bridge.ensure_certs(config_mod.CONFIG_DIR / "certs")
+            patched = tls_bridge.patch_cacert(info["ca_pem"])
+            if patched:
+                self.ctx.log.info(f"trusted local CA in {len(patched)} Ultralight cacert.pem "
+                                  "(restart SignalRGB once to load it)")
+            else:
+                self.ctx.log.warning("no Ultralight cacert.pem found to trust the CA "
+                                     "(is SignalRGB installed?)")
+            self.https = tls_bridge.HttpsStateServer(
+                "127.0.0.1", int(cfg.get("https_port", 3443)),
+                info["chain"], info["key"], _snapshot_state)
+            self.https.start()
+        except Exception:
+            self.ctx.log.exception("HTTPS bridge setup failed")
+
     def _on_state(self, state):
         self.ctx.events.publish("cs2.state", state)
-        write_state_file(self._effects_dir, state)
         hp = state.get("health")
         self.ctx.set_status({
             "label": f"CS2: {hp}HP" if hp is not None else "CS2: connected",
@@ -249,14 +258,14 @@ class Cs2GsiPlugin(Plugin):
                     _latest_state["connected"] = False
             if connected and stale:
                 self.ctx.events.publish("cs2.state", {"connected": False})
-                write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
                 self.ctx.set_status({"label": "CS2: idle", "color": (90, 90, 90)})
 
     def stop(self):
         self._stop.set()
         if self.server:
             self.server.stop()
-        write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
+        if self.https:
+            self.https.stop()
 
     # ── settings tab ──
     def build_settings_tab(self, parent, cfg):
