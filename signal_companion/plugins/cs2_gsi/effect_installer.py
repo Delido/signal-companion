@@ -2,14 +2,21 @@
 
 SignalRGB loads effects from the user's WhirlwindFX Effects folder. "Install"
 copies the bundled effect there; "uninstall" removes it. Works both from source
-and from the PyInstaller build — the html is collected as a data file, and we
-read it via the package's own location (falling back to importlib.resources).
+and from the PyInstaller build — the files are collected as data files, and we
+read them via the package's own location (falling back to importlib.resources).
+
+SignalRGB shows a library thumbnail from a .png with the same base name as the
+.html, so we install both files (without the .png the library shows a broken
+image).
 """
 import logging
 import os
 from pathlib import Path
 
 _EFFECT_NAME = "cs2_reactive.html"
+# All files that make up the installed effect. The .html is the primary one; the
+# .png is SignalRGB's library preview. Missing files are skipped gracefully.
+_EFFECT_FILES = ("cs2_reactive.html", "cs2_reactive.png")
 
 
 def _documents_dir() -> Path:
@@ -34,35 +41,47 @@ def locate_effects_dir() -> Path:
     return _documents_dir() / "WhirlwindFX" / "Effects"
 
 
-def _read_bundled_effect() -> bytes:
-    """Bytes of the bundled effect html, from the source tree or frozen bundle."""
-    here = Path(__file__).resolve().parent / "effect" / _EFFECT_NAME
+def _read_bundled(name) -> bytes:
+    """Bytes of a bundled effect file, from the source tree or frozen bundle."""
+    here = Path(__file__).resolve().parent / "effect" / name
     if here.is_file():
         return here.read_bytes()
     # Fallback for odd frozen layouts: read it as a package resource.
     from importlib import resources
     return (resources.files("signal_companion.plugins.cs2_gsi")
-            .joinpath("effect", _EFFECT_NAME).read_bytes())
+            .joinpath("effect", name).read_bytes())
 
 
 def install_effect(effects_dir=None) -> Path:
-    """Copy the bundled effect into the SignalRGB Effects folder. `effects_dir`
-    overrides auto-location. Returns the written path. Raises on failure."""
+    """Copy the bundled effect (html + preview png) into the SignalRGB Effects
+    folder. `effects_dir` overrides auto-location. Returns the html path. Raises
+    if the primary html can't be written."""
     target = Path(effects_dir) if effects_dir else locate_effects_dir()
     target.mkdir(parents=True, exist_ok=True)
-    dest = target / _EFFECT_NAME
-    dest.write_bytes(_read_bundled_effect())
-    logging.info(f"[cs2] installed effect → {dest}")
-    return dest
+    primary = target / _EFFECT_NAME
+    for name in _EFFECT_FILES:
+        try:
+            data = _read_bundled(name)
+        except Exception:
+            if name == _EFFECT_NAME:
+                raise            # the html is mandatory; the png is optional
+            logging.warning(f"[cs2] bundled effect file missing, skipped: {name}")
+            continue
+        (target / name).write_bytes(data)
+        logging.info(f"[cs2] installed effect file → {target / name}")
+    return primary
 
 
 def uninstall_effect(effects_dir=None):
-    """Remove the installed effect. Returns the deleted path, or None if it
-    wasn't there. Raises only on an actual delete error."""
+    """Remove the installed effect files. Returns the deleted html path, or None
+    if it wasn't there. Raises only on an actual delete error."""
     target = Path(effects_dir) if effects_dir else locate_effects_dir()
-    dest = target / _EFFECT_NAME
-    if dest.is_file():
-        dest.unlink()
-        logging.info(f"[cs2] removed effect → {dest}")
-        return dest
-    return None
+    removed_primary = None
+    for name in _EFFECT_FILES:
+        dest = target / name
+        if dest.is_file():
+            dest.unlink()
+            logging.info(f"[cs2] removed effect file → {dest}")
+            if name == _EFFECT_NAME:
+                removed_primary = dest
+    return removed_primary

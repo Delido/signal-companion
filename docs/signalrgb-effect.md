@@ -59,9 +59,14 @@ The CS2 Integration settings tab installs the effect for you:
 4. Make sure SignalCompanion is running, launch CS2, join a match.
 
 !!! note "Manual install still works"
-    If you'd rather do it by hand, copy `cs2_reactive.html` into
-    `Documents\WhirlwindFX\Effects\` or import it via **SignalRGB → Effects →
-    Add**.
+    If you'd rather do it by hand, copy **both** `cs2_reactive.html` and
+    `cs2_reactive.png` into `Documents\WhirlwindFX\Effects\`, or import the html
+    via **SignalRGB → Effects → Add**.
+
+!!! info "Library thumbnail"
+    SignalRGB shows a per-effect thumbnail from a `.png` with the same base name
+    as the `.html`. The bundled `cs2_reactive.png` provides it — without it the
+    library shows a broken-image placeholder. The installer copies it for you.
 
 ## Tuning
 

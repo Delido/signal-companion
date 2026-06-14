@@ -37,7 +37,7 @@ try:
 except Exception:
     pass
 
-datas = collect_data_files("signal_companion.plugins", includes=["**/*.html", "**/*.md", "**/*.cfg", "**/*.wav"])
+datas = collect_data_files("signal_companion.plugins", includes=["**/*.html", "**/*.md", "**/*.cfg", "**/*.wav", "**/*.png"])
 
 a = Analysis(
     ['signalcompanion_main.py'],
