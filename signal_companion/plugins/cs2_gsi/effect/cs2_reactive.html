@@ -24,12 +24,35 @@
     let state = { connected: false };
     let lastFetch = 0;
 
+    function applyState(s) {
+      state = (s && typeof s === "object") ? s : { connected: false };
+    }
+
+    // Pull the latest game state from the SignalCompanion bridge. The SignalRGB
+    // effect sandbox may not expose a network API at all — calling a missing
+    // fetch() would throw synchronously and kill the render loop (the effect
+    // then looks "dead" / won't activate). So guard every transport and never
+    // let this throw: worst case we just stay on idle lighting.
     function poll() {
-      const port = prop("port", 3000);
-      fetch(`http://127.0.0.1:${port}/state`, { cache: "no-store" })
-        .then(r => r.json())
-        .then(s => { state = s || { connected: false }; })
-        .catch(() => { /* bridge down → keep last/idle */ });
+      try {
+        const port = prop("port", 3000);
+        const url = `http://127.0.0.1:${port}/state`;
+        if (typeof fetch === "function") {
+          fetch(url, { cache: "no-store" })
+            .then(r => r.json())
+            .then(applyState)
+            .catch(() => { /* bridge down → keep last/idle */ });
+        } else if (typeof XMLHttpRequest === "function") {
+          const x = new XMLHttpRequest();
+          x.open("GET", url, true);
+          x.onreadystatechange = () => {
+            if (x.readyState === 4 && x.status === 200) {
+              try { applyState(JSON.parse(x.responseText)); } catch (e) {}
+            }
+          };
+          x.send();
+        }
+      } catch (e) { /* no network in this sandbox → stay idle, keep rendering */ }
     }
 
     function lerp(a, b, t) { return a + (b - a) * t; }
@@ -41,6 +64,7 @@
     }
 
     function render(now) {
+     try {
       const bright = prop("brightness", 100) / 100;
       let r = 0, g = 0, b = 0;
 
@@ -88,12 +112,16 @@
 
       ctx.fillStyle = `rgb(${(r*bright)|0}, ${(g*bright)|0}, ${(b*bright)|0})`;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
+     } catch (e) { /* never let a frame error stop the loop */ }
 
+      // Poll on a throttle; guarded so a missing/blocked transport can't break
+      // the loop. The loop ALWAYS reschedules so the effect keeps running.
       if (now - lastFetch > 100) { lastFetch = now; poll(); }
       requestAnimationFrame(render);
     }
 
-    poll();
+    // Start the render loop unconditionally (no top-level fetch that could throw
+    // before we ever start drawing).
     requestAnimationFrame(render);
   </script>
 </body>
