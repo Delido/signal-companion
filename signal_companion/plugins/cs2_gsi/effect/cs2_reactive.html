@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>CS2 Reactive (SignalCompanion)</title>
+  <meta description="Reacts to Counter-Strike 2 via SignalCompanion's GSI bridge: HP gradient, low-HP pulse, flashbang white-out, bomb-planted alarm, team tint." />
+  <meta publisher="SignalCompanion" />
+  <meta property="port" label="Bridge port" type="number" min="1" max="65535" default="3000">
+  <meta property="brightness" label="Brightness" type="number" min="0" max="100" default="100">
+</head>
+<body style="margin:0; background:#000;">
+  <canvas id="exCanvas" width="320" height="200"></canvas>
+  <script>
+    const canvas = document.getElementById("exCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // SignalRGB injects engine.set/get for properties; fall back to defaults
+    // when previewed in a normal browser.
+    function prop(name, def) {
+      try { return (window.engine && engine.get) ? engine.get(name) : def; }
+      catch (e) { return def; }
+    }
+
+    let state = { connected: false };
+    let lastFetch = 0;
+
+    function poll() {
+      const port = prop("port", 3000);
+      fetch(`http://127.0.0.1:${port}/state`, { cache: "no-store" })
+        .then(r => r.json())
+        .then(s => { state = s || { connected: false }; })
+        .catch(() => { /* bridge down → keep last/idle */ });
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    function teamBase(team) {
+      if (team === "T")  return [60, 28, 6];     // dim amber
+      if (team === "CT") return [6, 22, 50];      // dim blue
+      return [10, 10, 12];
+    }
+
+    function render(now) {
+      const bright = prop("brightness", 100) / 100;
+      let r = 0, g = 0, b = 0;
+
+      if (!state.connected) {
+        // Idle breathing white/grey when not in a live match.
+        const p = (Math.sin(now / 1200) + 1) / 2;
+        r = g = b = lerp(8, 26, p);
+      } else {
+        const base = teamBase(state.team);
+        r = base[0]; g = base[1]; b = base[2];
+
+        const hp = (state.health == null) ? 100 : state.health;
+        const alive = hp > 0 && state.activity !== "menu";
+
+        if (alive) {
+          // HP gradient green(full) → red(low).
+          const t = Math.max(0, Math.min(1, hp / 100));
+          r = lerp(220, 30, t);
+          g = lerp(30, 200, t);
+          b = 30;
+          // Low-HP pulse below 35.
+          if (hp <= 35) {
+            const pulse = (Math.sin(now / 180) + 1) / 2;
+            r = lerp(r, 255, pulse * (1 - hp / 35));
+            g = lerp(g, 0, pulse * (1 - hp / 35));
+            b = 0;
+          }
+        } else {
+          // Dead → dim team tint.
+          r *= 0.4; g *= 0.4; b *= 0.4;
+        }
+
+        // Bomb planted → red alarm overrides everything.
+        if (state.bomb === "planted") {
+          const pulse = (Math.sin(now / 140) + 1) / 2;
+          r = lerp(120, 255, pulse); g = lerp(0, 20, pulse); b = 0;
+        }
+
+        // Flashbang → white-out scaled by flashed (0..255).
+        const fl = (state.flashed || 0) / 255;
+        if (fl > 0.02) {
+          r = lerp(r, 255, fl); g = lerp(g, 255, fl); b = lerp(b, 255, fl);
+        }
+      }
+
+      ctx.fillStyle = `rgb(${(r*bright)|0}, ${(g*bright)|0}, ${(b*bright)|0})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (now - lastFetch > 100) { lastFetch = now; poll(); }
+      requestAnimationFrame(render);
+    }
+
+    poll();
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>

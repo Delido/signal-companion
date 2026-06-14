@@ -1,0 +1,9 @@
+# SignalCompanion runtime dependencies.
+#   pip install -r signal_companion/requirements.txt
+pystray            # system tray icon
+Pillow             # tray icon rendering
+psutil             # process watching (Game Mode)
+pywinusb           # HID access (keyboard/headset)
+pycaw              # Windows audio endpoint control (mic mute/drift)
+comtypes           # COM bindings used by pycaw
+ttkbootstrap       # modern themed settings UI (falls back to plain ttk if absent)

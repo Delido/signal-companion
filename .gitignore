@@ -1,0 +1,12 @@
+# PyInstaller build output (~20 MB single-file exe + intermediates).
+# The hand-written SignalCompanion.spec IS tracked; only generated output is ignored.
+build/
+dist/
+
+# Python bytecode caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Local diagnostic captures (kept out of the published repo)
+dumps/
