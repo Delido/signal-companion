@@ -1,10 +1,10 @@
 @echo off
-REM Build single-file SignalCompanion.exe (tray app, windowed).
-REM Output: dist\SignalCompanion.exe
+REM Build SignalCompanion (tray app, windowed) as a ONEDIR folder.
+REM Output: dist\SignalCompanion\SignalCompanion.exe (+ supporting files)
 REM
-REM Uses the spec so dynamically-imported plugins + the CS2 effect data files
-REM are collected. Quit any running tray instance first (PyInstaller can't
-REM overwrite a locked exe).
+REM Uses the spec so dynamically-imported plugins + data files are collected.
+REM Onedir (not onefile) is friendlier to Microsoft Defender. Quit any running
+REM tray instance first (PyInstaller can't overwrite a locked exe).
 
 setlocal
 cd /d "%~dp0"
@@ -24,5 +24,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo Built: %~dp0dist\SignalCompanion.exe
+echo Built: %~dp0dist\SignalCompanion\SignalCompanion.exe
 endlocal

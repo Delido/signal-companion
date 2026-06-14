@@ -138,5 +138,5 @@ plus its data files.
   `**/*.html | *.md | *.cfg` data glob (e.g. the CS2 effect). Other file types
   need a glob addition.
 
-See [Development → building](development.md#building-the-exe) for the spec
+See [Development → building](development.md#building-the-app-onedir) for the spec
 details (including the `sys.path` fix that makes plugin collection work).

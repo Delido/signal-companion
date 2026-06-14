@@ -13,3 +13,6 @@ dumps/
 
 # MkDocs build output (docs source under docs/ + mkdocs.yml ARE tracked)
 site/
+
+# Inno Setup compiled installer (the .iss IS tracked; the built Setup.exe isn't)
+installer/Output/

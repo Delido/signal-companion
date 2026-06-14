@@ -39,19 +39,36 @@ python -m signal_companion
 python -m signal_companion.app --settings
 ```
 
-## Build the single-file exe
+## Build the app (onedir)
 
 ```powershell
-build_signalcompanion.bat        # -> dist\SignalCompanion.exe
+build_signalcompanion.bat        # -> dist\SignalCompanion\SignalCompanion.exe
 ```
 
 The batch file drives PyInstaller through `SignalCompanion.spec`, which collects
-the dynamically-imported plugins and their data files. See
+the dynamically-imported plugins and their data files. The build is a **onedir**
+folder (an exe plus an `_internal\` folder), not a single self-extracting file —
+this is friendlier to Microsoft Defender and starts faster. See
 [Development & building](development.md) for the details and gotchas.
 
 !!! tip "Quit before rebuilding"
     PyInstaller can't overwrite a locked exe. Quit any running tray instance
     (and close the settings window) before building.
+
+## Build the installer
+
+To produce a Windows Setup `.exe` (Start Menu shortcut, optional autostart,
+uninstaller):
+
+```powershell
+build_installer.bat              # -> installer\Output\SignalCompanion-Setup-<version>.exe
+```
+
+Requires [Inno Setup 6](https://jrsoftware.org/isdl.php)
+(`winget install JRSoftware.InnoSetup`) and a prior `build_signalcompanion.bat`
+run. The installer defaults to a **per-user** install (no UAC prompt); you can
+choose an all-users install in the dialog. Your config in
+`%APPDATA%\SignalCompanion` is preserved across reinstalls and uninstalls.
 
 ## Configuration & logs
 

@@ -3,11 +3,20 @@
 #
 # Plugins are imported dynamically by core.manager, so PyInstaller can't see
 # them by static analysis — collect the whole plugins subpackage plus its data
-# files (the CS2 effect HTML + READMEs).
+# files (the CS2 effect HTML + READMEs + battery sound).
+#
+# ONEDIR build (not onefile): a onefile exe self-extracts to a temp dir on every
+# launch, which Microsoft Defender often flags / rescans. A onedir folder under
+# Program Files is friendlier to Defender and faster to start. The Inno Setup
+# installer (installer/SignalCompanion.iss) packages this folder.
 
+import os
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+ICON = os.path.join(SPECPATH, "assets", "signalcompanion.ico")
+ICON = ICON if os.path.isfile(ICON) else None
 
 # collect_submodules imports the package to enumerate it, and runs at spec-eval
 # time — before Analysis applies `pathex`. So the repo root must be on sys.path
@@ -28,7 +37,7 @@ try:
 except Exception:
     pass
 
-datas = collect_data_files("signal_companion.plugins", includes=["**/*.html", "**/*.md", "**/*.cfg"])
+datas = collect_data_files("signal_companion.plugins", includes=["**/*.html", "**/*.md", "**/*.cfg", "**/*.wav"])
 
 a = Analysis(
     ['signalcompanion_main.py'],
@@ -48,20 +57,29 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+    [],                       # onedir: binaries/datas go in COLLECT, not the exe
+    exclude_binaries=True,
     name='SignalCompanion',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=ICON,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='SignalCompanion',
 )
