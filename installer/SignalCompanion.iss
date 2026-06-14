@@ -12,7 +12,11 @@
 #define MyAppPublisher "Sebastian Mendyka"
 #define MyAppURL "https://github.com/Delido/signal-companion"
 #define MyAppExeName "SignalCompanion.exe"
-#define SourceDir "..\dist\SignalCompanion"
+; SourceDir can be overridden from the command line (ISCC /DSourceDir=...) so we
+; can build from a temp dist outside OneDrive (which locks the in-repo dist).
+#ifndef SourceDir
+  #define SourceDir "..\dist\SignalCompanion"
+#endif
 
 [Setup]
 ; A unique, stable AppId — keep this constant across versions so upgrades work.

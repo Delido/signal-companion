@@ -75,6 +75,7 @@ def _parse_gsi(payload):
         "activity": player.get("activity"),        # "playing"/"menu"/...
         "round_phase": rnd.get("phase"),           # freezetime/live/over
         "bomb": rnd.get("bomb"),                   # planted/defused/exploded
+        "win_team": rnd.get("win_team"),           # "T"/"CT" when round is over
         "map_phase": mp.get("phase"),
         "round": mp.get("round"),
         "weapon": weapon_name,
