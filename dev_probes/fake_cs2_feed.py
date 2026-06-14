@@ -15,28 +15,34 @@ from signal_companion.core import config as config_mod
 from signal_companion.plugins.cs2_gsi import tls_bridge
 
 _start = time.time()
-PHASE_SECONDS = 3
-PHASES = ["full_hp", "low_hp", "bomb", "flash", "dead"]
+# (name, seconds) — bomb held long enough to hear the tick accelerate; flash
+# fades; dead long enough to see the vignette close then respawn.
+SEGMENTS = [("full_hp", 3), ("low_hp", 3), ("bomb", 10), ("flash", 3), ("dead", 5)]
+TOTAL = sum(s for _, s in SEGMENTS)
 
 
 def fake_state():
-    t = time.time() - _start
-    phase = PHASES[int(t / PHASE_SECONDS) % len(PHASES)]
-    team = "T" if int(t / (PHASE_SECONDS * len(PHASES))) % 2 == 0 else "CT"
+    t = (time.time() - _start) % TOTAL
+    acc = 0.0
+    phase, seg_t, seg_len = "full_hp", 0.0, 1.0
+    for name, length in SEGMENTS:
+        if t < acc + length:
+            phase, seg_t, seg_len = name, t - acc, length
+            break
+        acc += length
+    team = "CT" if int((time.time() - _start) / TOTAL) % 2 == 0 else "T"
     s = {"connected": True, "ts": time.time(), "team": team, "activity": "playing",
          "round_phase": "live", "health": 100, "armor": 100, "flashed": 0,
-         "smoked": 0, "burning": 0, "bomb": None, "round_kills": 0,
-         "phase": phase}
-    if phase == "full_hp":
-        s["health"] = 100
-    elif phase == "low_hp":
+         "smoked": 0, "burning": 0, "bomb": None, "round_kills": 0, "phase": phase}
+    if phase == "low_hp":
         s["health"] = 15
     elif phase == "bomb":
         s["bomb"] = "planted"
     elif phase == "flash":
-        s["flashed"] = 255
+        s["flashed"] = int(255 * max(0.0, 1.0 - seg_t / seg_len))  # fade out
     elif phase == "dead":
         s["health"] = 0
+        s["activity"] = "playing"
     return s
 
 

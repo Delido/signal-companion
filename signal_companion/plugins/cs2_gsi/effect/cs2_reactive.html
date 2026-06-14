@@ -1,6 +1,6 @@
 <head>
   <title>CS2 Reactive (SignalCompanion)</title>
-  <meta description="Counter-Strike 2 reactive lighting via the SignalCompanion HTTPS bridge: team base glow, HP gradient, low-HP pulse, kill flash, flashbang white-out, smoke and molotov tints, accelerating bomb tick, explosion and defuse flashes." />
+  <meta description="Counter-Strike 2 reactive lighting via the SignalCompanion HTTPS bridge: HP gradient, low-HP edge pulse, kill flash, full flashbang white-out, smoke and molotov tints, a bomb tick synced to the 40s C4 fuse, explosion and defuse flashes, and a death vignette that closes in from the edges." />
   <meta publisher="SignalCompanion" />
   <meta property="brightness" label="Brightness" type="number" min="0" max="100" default="100" />
 </head>
@@ -10,29 +10,26 @@
 </body>
 
 <script>
-  // Reliable build. Lessons baked in: top-level start (SignalRGB doesn't call
-  // onEngineReady), POST polling over the HTTPS bridge (GET gets cached/frozen),
-  // NaN-safe colours (a stray NaN once froze everything to black), and a VER
-  // marker in the readout so we can always tell which build SignalRGB loaded
-  // (it caches the effect HTML hard — only a full restart reloads it).
-  var VER = "v1.2";
+  var VER = "v2.0";
   var c = document.getElementById("exCanvas");
   var ctx = c.getContext("2d");
-  var W = 320, H = 200;
+  var W = 320, H = 200, CX = 160, CY = 100, MAXR = 200;  // center-to-corner ~189
 
   var state = { connected: false };
   var okCount = 0, errCount = 0, lastOk = -99999, fetching = false, lastPoll = 0;
-  var lastTeam = null, prevBomb = null, prevKills = null;
-  var bombAt = -1, explodeUntil = -1, defuseUntil = -1, killUntil = -1;
-  var disp = [10, 10, 12];
+  var lastNow = 0, lastTeam = null;
+  var prevBomb = null, prevKills = null, wasDead = false;
+  var bombAt = -1, bombPhase = 0, deathAt = -1;
+  var explodeUntil = -1, defuseUntil = -1, killUntil = -1;
 
   function num(v, d) { v = +v; return isFinite(v) ? v : d; }
   function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
   function teamCol(team) {
-    if (team === "T") return [210, 160, 0];      // amber/yellow
-    if (team === "CT") return [0, 70, 205];       // blue
-    return [0, 110, 170];                          // neutral cyan
+    if (team === "T") return [230, 150, 0];
+    if (team === "CT") return [0, 90, 230];
+    return [0, 120, 180];
   }
 
   function poll() {
@@ -52,89 +49,134 @@
     } catch (e) { errCount++; fin(); }
   }
 
-  function fill(r, g, b) {
-    r = num(r, 0); g = num(g, 0); b = num(b, 0);
-    r = r < 0 ? 0 : r > 255 ? 255 : r;
-    g = g < 0 ? 0 : g > 255 ? 255 : g;
-    b = b < 0 ? 0 : b > 255 ? 255 : b;
-    ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
+  function fillAll(r, g, b) {
+    ctx.fillStyle = "rgb(" + (clamp(num(r, 0), 0, 255) | 0) + "," + (clamp(num(g, 0), 0, 255) | 0) + "," + (clamp(num(b, 0), 0, 255) | 0) + ")";
     ctx.fillRect(0, 0, W, H);
   }
 
-  // Returns the target colour [r,g,b] for the current state.
-  function target(now) {
+  // Radial base: colour in the centre fading a bit darker to the edges.
+  function radialBase(col, edgeMul) {
+    var g = ctx.createRadialGradient(CX, CY, 10, CX, CY, MAXR);
+    g.addColorStop(0, "rgb(" + (col[0] | 0) + "," + (col[1] | 0) + "," + (col[2] | 0) + ")");
+    g.addColorStop(1, "rgb(" + (col[0] * edgeMul | 0) + "," + (col[1] * edgeMul | 0) + "," + (col[2] * edgeMul | 0) + ")");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+
+  // Pulsing red glow on the edges (low HP / bomb), centre stays clearer.
+  function edgePulse(rgb, alpha) {
+    var g = ctx.createRadialGradient(CX, CY, 40, CX, CY, MAXR);
+    g.addColorStop(0, "rgba(" + rgb + ",0)");
+    g.addColorStop(0.55, "rgba(" + rgb + "," + (alpha * 0.4).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(" + rgb + "," + alpha.toFixed(3) + ")");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+
+  function overlay(rgba) { ctx.fillStyle = rgba; ctx.fillRect(0, 0, W, H); }
+
+  // Black vignette closing from the edges to the centre (death). prog 0..1.
+  function closingBlack(prog) {
+    var clearR = MAXR * (1 - prog);
+    var inner = Math.max(0, clearR - 55);
+    var g = ctx.createRadialGradient(CX, CY, inner, CX, CY, clearR + 1);
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, "rgba(0,0,0,1)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (prog >= 1) fillAll(0, 0, 0);
+  }
+
+  function render(now, dt) {
     var p = (Math.sin(now / 600) + 1) / 2;
 
-    if (okCount === 0) return [110 + 130 * p, 0, 0];          // never reached bridge
-    if (now - lastOk > 2500) return [210, 70 + 90 * p, 0];    // bridge went away
-    if (now < explodeUntil) {                                 // explosion
-      var e = (explodeUntil - now) / 700;
-      return [255, lerp(60, 235, e), lerp(0, 150, e)];
-    }
-    if (now < defuseUntil) {                                  // defuse
-      var d = (defuseUntil - now) / 600;
-      return [lerp(20, 0, d), lerp(40, 255, d), lerp(40, 80, d)];
-    }
-    if (now < killUntil) return [255, 255, 255];              // kill flash
+    // ── connection diagnostics ──
+    if (okCount === 0) { fillAll(110 + 130 * p, 0, 0); return; }      // never reached bridge
+    if (now - lastOk > 2500) { fillAll(210, 70 + 90 * p, 0); return; } // bridge gone
 
-    if (!state || !state.connected) {                         // idle: bridge ok, no match
-      var bc = lastTeam ? teamCol(lastTeam) : [0, 110, 170];
-      var s = 0.45 + 0.45 * p;
-      return [bc[0] * s, bc[1] * s, bc[2] * s];
+    if (!state || !state.connected) {                                 // idle: no match
+      var bc = lastTeam ? teamCol(lastTeam) : [0, 120, 180];
+      var s = 0.4 + 0.45 * p;
+      radialBase([bc[0] * s, bc[1] * s, bc[2] * s], 0.35);
+      return;
     }
 
     lastTeam = state.team || lastTeam;
     var hp = (state.health == null) ? 100 : num(state.health, 100);
     var alive = hp > 0 && state.activity !== "menu";
-    var col;
 
-    if (state.bomb === "planted") {                          // accelerating red tick
-      var frac = bombAt >= 0 ? Math.min(1, (now - bombAt) / 40000) : 0;
-      var bp = (Math.sin(now / lerp(380, 90, frac)) + 1) / 2;
-      col = [lerp(90, 255, bp), 0, 0];
-    } else if (!alive) {                                     // dead → dim team
-      var dc = teamCol(state.team);
-      col = [dc[0] * 0.22 + 6, dc[1] * 0.22 + 6, dc[2] * 0.22 + 10];
-    } else if (state.round_phase === "freezetime") {        // round start → team glow
+    // ── base layer ──
+    if (state.round_phase === "freezetime") {
       var fz = teamCol(state.team);
-      col = [fz[0] * 0.85, fz[1] * 0.85, fz[2] * 0.85];
+      radialBase([fz[0] * 0.8, fz[1] * 0.8, fz[2] * 0.8], 0.5);
     } else {
-      var k = hp / 100; if (k < 0) k = 0; if (k > 1) k = 1;  // HP gradient
-      col = [lerp(220, 30, k), lerp(30, 200, k), 30];
-      if (hp <= 35) { var lp = p * (1 - hp / 35); col = [lerp(col[0], 255, lp), lerp(col[1], 0, lp), 0]; }
-      if (num(state.burning, 0) > 0) { var bf = (Math.sin(now / 55) + 1) / 2; col = [lerp(col[0], 255, 0.6), lerp(col[1], 100 + 70 * bf, 0.6), 0]; }
-      if (num(state.smoked, 0) > 0) { var av = (col[0] + col[1] + col[2]) / 3; col = [lerp(col[0], av, 0.6), lerp(col[1], av, 0.6), lerp(col[2], av, 0.6)]; }
+      var k = clamp(hp / 100, 0, 1);
+      radialBase([lerp(220, 30, k), lerp(30, 200, k), 30], 0.45);
     }
 
-    var fl = num(state.flashed, 0) / 255;                    // flashbang white-out
-    if (fl > 0.02) col = [lerp(col[0], 255, fl), lerp(col[1], 255, fl), lerp(col[2], 255, fl)];
-    return col;
+    // ── smoke desaturate / molotov flicker (over base) ──
+    if (num(state.smoked, 0) > 0) overlay("rgba(150,150,150," + (0.45).toFixed(2) + ")");
+    if (num(state.burning, 0) > 0) {
+      var bf = (Math.sin(now / 50) + 1) / 2;
+      overlay("rgba(255," + (90 + 80 * bf | 0) + ",0,0.45)");
+    }
+
+    // ── low-HP edge pulse ──
+    if (alive && hp <= 35) edgePulse("255,0,0", clamp((1 - hp / 35), 0, 1) * (0.4 + 0.5 * p));
+
+    // ── bomb: accelerating tick synced to the ~40 s C4 fuse ──
+    if (state.bomb === "planted" && bombAt >= 0) {
+      var el = (now - bombAt) / 1000;
+      var frac = clamp(el / 40, 0, 1);
+      var beepsPerSec = lerp(1.0, 9.0, frac);
+      bombPhase += (dt / 1000) * beepsPerSec;
+      var on = (bombPhase % 1) < 0.4;
+      edgePulse("255,0,0", on ? 0.9 : 0.18);                          // beep flash on edges
+      if (on) overlay("rgba(255,0,0,0.12)");
+    }
+
+    // ── kill flash ──
+    if (now < killUntil) overlay("rgba(255,255,255," + clamp((killUntil - now) / 300, 0, 1).toFixed(2) + ")");
+
+    // ── defuse / explosion ──
+    if (now < defuseUntil) overlay("rgba(0,255,90," + clamp((defuseUntil - now) / 600, 0, 1).toFixed(2) + ")");
+    if (now < explodeUntil) {
+      var e = clamp((explodeUntil - now) / 900, 0, 1);
+      overlay("rgba(255," + (60 + 180 * e | 0) + "," + (0 + 140 * e | 0) + "," + (0.85 * e + 0.1).toFixed(2) + ")");
+    }
+
+    // ── death: black closes in from the edges, then stays black ──
+    if (deathAt >= 0) closingBlack(clamp((now - deathAt) / 2500, 0, 1));
+
+    // ── flashbang: full white-out on top (you're blinded) ──
+    var fl = clamp(num(state.flashed, 0) / 255, 0, 1);
+    if (fl > 0.02) overlay("rgba(255,255,255," + fl.toFixed(3) + ")");
   }
 
   function update() {
     var now = Date.now();
+    var dt = clamp(now - (lastNow || now), 0, 100); lastNow = now;
     try {
-      // event edges
-      if (state && state.bomb === "planted") { if (bombAt < 0) bombAt = now; } else { bombAt = -1; }
-      if (state && state.bomb === "exploded" && prevBomb !== "exploded") explodeUntil = now + 700;
-      if (state && state.bomb === "defused" && prevBomb !== "defused") defuseUntil = now + 600;
-      prevBomb = state ? state.bomb : null;
-      if (state && state.connected && prevKills != null && state.round_kills != null && state.round_kills > prevKills) killUntil = now + 300;
-      prevKills = state ? state.round_kills : null;
+      // ── event edges ──
+      var connected = state && state.connected;
+      var hp = state && state.health != null ? num(state.health, 100) : 100;
+      var isDead = connected && hp <= 0 && state.activity !== "menu";
+      if (isDead && !wasDead) deathAt = now;                 // just died
+      if (!isDead) deathAt = -1;
+      wasDead = isDead;
 
-      var t = target(now);
-      var sp = 0.25;                                          // light smoothing
-      if (!isFinite(disp[0])) disp[0] = num(t[0], 0);
-      if (!isFinite(disp[1])) disp[1] = num(t[1], 0);
-      if (!isFinite(disp[2])) disp[2] = num(t[2], 0);
-      disp[0] = lerp(disp[0], num(t[0], 0), sp);
-      disp[1] = lerp(disp[1], num(t[1], 0), sp);
-      disp[2] = lerp(disp[2], num(t[2], 0), sp);
+      if (connected && state.bomb === "planted") { if (bombAt < 0) { bombAt = now; bombPhase = 0; } }
+      else { bombAt = -1; }
+      if (connected && state.bomb === "exploded" && prevBomb !== "exploded") explodeUntil = now + 900;
+      if (connected && state.bomb === "defused" && prevBomb !== "defused") defuseUntil = now + 600;
+      prevBomb = connected ? state.bomb : null;
+      if (connected && prevKills != null && state.round_kills != null && state.round_kills > prevKills) killUntil = now + 300;
+      prevKills = connected ? state.round_kills : null;
 
-      var br = num(window.brightness, 100) / 100; if (br < 0 || !isFinite(br)) br = 1;
-      fill(disp[0] * br, disp[1] * br, disp[2] * br);
+      render(now, dt);
 
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      var br = num(window.brightness, 100) / 100;
+      if (br < 0 || !isFinite(br)) br = 1;
+      if (br < 1) overlay("rgba(0,0,0," + (1 - br).toFixed(3) + ")");  // global dim
+
+      ctx.fillStyle = "rgba(255,255,255,0.5)";
       ctx.font = "9px monospace";
       ctx.fillText(VER + " ok:" + okCount + " err:" + errCount + " hp:" + (state && state.health), 3, H - 5);
     } catch (e) {}
