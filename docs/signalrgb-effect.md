@@ -47,13 +47,21 @@ It lives at `signal_companion/plugins/cs2_gsi/effect/cs2_reactive.html`.
 
 ## Install
 
+The CS2 Integration settings tab installs the effect for you:
+
 1. Set up the receiver first — see
    [CS2 Integration → Setup](plugins/cs2-integration.md#setup).
-2. Copy `cs2_reactive.html` into your SignalRGB effects folder, typically
-   `Documents\WhirlwindFX\Effects\` (or import via **SignalRGB → Effects →
-   Add**).
-3. Apply the **CS2 Reactive** effect to a layer in SignalRGB.
+2. In **Settings → CS2 Integration**, under *2) SignalRGB effect*, click
+   **Install effect to SignalRGB**. This copies `cs2_reactive.html` into your
+   SignalRGB Effects folder (auto-located, honouring OneDrive/Documents
+   redirection). **Uninstall** removes it again.
+3. In SignalRGB, apply the **CS2 Reactive** effect to a layer.
 4. Make sure SignalCompanion is running, launch CS2, join a match.
+
+!!! note "Manual install still works"
+    If you'd rather do it by hand, copy `cs2_reactive.html` into
+    `Documents\WhirlwindFX\Effects\` or import it via **SignalRGB → Effects →
+    Add**.
 
 ## Tuning
 

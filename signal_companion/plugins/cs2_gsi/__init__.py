@@ -22,7 +22,8 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from signal_companion.core.plugin import Plugin
-from .cfg_installer import install_gsi_cfg, locate_cs2_cfg_dir
+from .cfg_installer import install_gsi_cfg, uninstall_gsi_cfg, locate_cs2_cfg_dir
+from .effect_installer import install_effect, uninstall_effect, locate_effects_dir
 
 # Shared latest-state, guarded by a lock. The HTTP handler writes it from the
 # server thread; GET /state and the EventBus publish read it.
@@ -241,14 +242,15 @@ class Cs2GsiPlugin(Plugin):
         ttk.Entry(tok_row, textvariable=token, width=24).pack(side=tk.LEFT, padx=6)
         vars["auth_token"] = token
 
+        # ── CS2 GSI config (step 1) ──
         ttk.Separator(parent, orient="horizontal").pack(fill=tk.X, pady=8)
-        ttk.Label(parent, text="CS2 integration config:", font=("", 9, "bold")).pack(anchor="w")
+        ttk.Label(parent, text="1) CS2 integration config:", font=("", 9, "bold")).pack(anchor="w")
 
         located = locate_cs2_cfg_dir() or "(not found — set manually)"
         ttk.Label(parent, text=f"CS2 cfg folder: {located}", foreground="#888",
                   wraplength=460, justify="left").pack(anchor="w", pady=(2, 4))
 
-        def do_install():
+        def do_install_cfg():
             try:
                 p = int(port.get())
             except ValueError:
@@ -264,10 +266,62 @@ class Cs2GsiPlugin(Plugin):
                 messagebox.showerror("Install failed",
                                      f"{e}\n\nSet the CS2 cfg folder manually in config.json "
                                      "(plugins → cs2-gsi → cfg_dir).")
-        ttk.Button(parent, text="Install CS2 GSI config…", command=do_install).pack(anchor="w", pady=(2, 6))
 
-        ttk.Label(parent, text=("Then load the bundled SignalRGB effect (see the cs2_gsi/effect "
-                                "folder) so the lighting reacts to HP, bomb, flashbangs and team."),
+        def do_uninstall_cfg():
+            try:
+                dest = uninstall_gsi_cfg(cfg_dir=cfg.get("cfg_dir") or None)
+            except Exception as e:
+                messagebox.showerror("Uninstall failed", str(e))
+                return
+            if dest:
+                messagebox.showinfo("Removed",
+                                    f"Deleted:\n{dest}\n\nRestart CS2 for it to take effect.")
+            else:
+                messagebox.showinfo("Nothing to remove",
+                                    "No SignalCompanion GSI config was found.")
+
+        cfg_btns = ttk.Frame(parent)
+        cfg_btns.pack(anchor="w", pady=(2, 6))
+        ttk.Button(cfg_btns, text="Install CS2 GSI config…", command=do_install_cfg).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(cfg_btns, text="Uninstall", command=do_uninstall_cfg).pack(side=tk.LEFT)
+
+        # ── SignalRGB effect / canvas (step 2) ──
+        ttk.Separator(parent, orient="horizontal").pack(fill=tk.X, pady=8)
+        ttk.Label(parent, text="2) SignalRGB effect (the canvas):", font=("", 9, "bold")).pack(anchor="w")
+
+        fx_dir = locate_effects_dir()
+        ttk.Label(parent, text=f"Effects folder: {fx_dir}", foreground="#888",
+                  wraplength=460, justify="left").pack(anchor="w", pady=(2, 4))
+
+        def do_install_effect():
+            try:
+                dest = install_effect()
+                messagebox.showinfo("Installed",
+                                    f"Copied cs2_reactive.html to:\n{dest}\n\n"
+                                    "In SignalRGB, apply the 'CS2 Reactive' effect to a layer and "
+                                    f"set its Bridge port to {port.get()}.")
+            except Exception as e:
+                messagebox.showerror("Install failed", str(e))
+
+        def do_uninstall_effect():
+            try:
+                dest = uninstall_effect()
+            except Exception as e:
+                messagebox.showerror("Uninstall failed", str(e))
+                return
+            if dest:
+                messagebox.showinfo("Removed", f"Deleted:\n{dest}")
+            else:
+                messagebox.showinfo("Nothing to remove",
+                                    "No CS2 Reactive effect was found in the Effects folder.")
+
+        fx_btns = ttk.Frame(parent)
+        fx_btns.pack(anchor="w", pady=(2, 6))
+        ttk.Button(fx_btns, text="Install effect to SignalRGB", command=do_install_effect).pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(fx_btns, text="Uninstall", command=do_uninstall_effect).pack(side=tk.LEFT)
+
+        ttk.Label(parent, text=("The effect reacts to HP, low-HP pulse, flashbangs, bomb and team. "
+                                "After installing, select it on a layer in SignalRGB."),
                   foreground="#888", justify="left", wraplength=460).pack(anchor="w")
         return vars
 

@@ -104,3 +104,17 @@ def install_gsi_cfg(port=3000, token="signalcompanion", cfg_dir=None):
     dest.write_text(_cfg_contents(port, token), encoding="utf-8")
     logging.info(f"[cs2] installed GSI cfg → {dest}")
     return dest
+
+
+def uninstall_gsi_cfg(cfg_dir=None):
+    """Remove the SignalCompanion GSI cfg. `cfg_dir` overrides auto-location.
+    Returns the deleted path, or None if it wasn't there."""
+    target_dir = Path(cfg_dir) if cfg_dir else locate_cs2_cfg_dir()
+    if not target_dir:
+        return None
+    dest = Path(target_dir) / _CFG_NAME
+    if dest.is_file():
+        dest.unlink()
+        logging.info(f"[cs2] removed GSI cfg → {dest}")
+        return dest
+    return None

@@ -33,12 +33,15 @@ CS2  ──(GSI POST)──▶  SignalCompanion (cs2-gsi plugin, http://127.0.0.
 
 ## Setup
 
-1. In **Settings → CS2 Integration**, click **Install CS2 GSI config…**. This
-   writes `gamestate_integration_signalcompanion.cfg` into your CS2 `cfg`
-   folder (auto-located via the Steam registry + `libraryfolders.vdf`, appid
-   730). **Restart CS2** afterwards.
-2. Install the bundled SignalRGB effect — see
-   **[SignalRGB effect](../signalrgb-effect.md)**.
+1. In **Settings → CS2 Integration**, under *1) CS2 integration config*, click
+   **Install CS2 GSI config…**. This writes
+   `gamestate_integration_signalcompanion.cfg` into your CS2 `cfg` folder
+   (auto-located via the Steam registry + `libraryfolders.vdf`, appid 730).
+   **Restart CS2** afterwards. (**Uninstall** removes the cfg again.)
+2. Under *2) SignalRGB effect*, click **Install effect to SignalRGB** to copy
+   the effect into your SignalRGB Effects folder — see
+   **[SignalRGB effect](../signalrgb-effect.md)**. Then apply the *CS2 Reactive*
+   effect to a layer in SignalRGB.
 3. Make sure SignalCompanion is running, then launch CS2 and join a match.
 
 ## Settings

@@ -11,11 +11,29 @@ the tray can show the level.
 """
 import threading
 import time
+from pathlib import Path
 
 import tkinter as tk
 from tkinter import filedialog, ttk
 
 from signal_companion.core.plugin import Plugin
+
+
+def default_sound_path():
+    """Path to the bundled low-battery chime (source tree or frozen bundle), or
+    "" if it can't be located (caller then falls back to the system beep)."""
+    here = Path(__file__).resolve().parent / "sounds" / "battery_low.wav"
+    if here.is_file():
+        return str(here)
+    try:
+        from importlib import resources
+        with resources.as_file(
+            resources.files("signal_companion.plugins.battery_alert")
+            .joinpath("sounds", "battery_low.wav")
+        ) as p:
+            return str(p) if Path(p).is_file() else ""
+    except Exception:
+        return ""
 
 
 class BatteryPoller(threading.Thread):
@@ -70,7 +88,9 @@ class BatteryPoller(threading.Thread):
                 self._below = True
                 self._last_alert = now
                 self.ctx.log.info(f"battery low ({level}% ≤ {threshold}%) → alert")
-                self.ctx.play_sound(cfg.get("sound_path") or None)
+                # Empty path → bundled battery chime; system beep only if that's
+                # somehow missing too.
+                self.ctx.play_sound(cfg.get("sound_path") or default_sound_path() or None)
 
 
 class BatteryAlertPlugin(Plugin):
@@ -148,9 +168,9 @@ class BatteryAlertPlugin(Plugin):
 
         snd_row = ttk.Frame(parent)
         snd_row.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(snd_row, text="Sound (.wav, empty = system beep):").pack(side=tk.LEFT)
+        ttk.Label(snd_row, text="Sound (.wav, empty = built-in chime):").pack(side=tk.LEFT)
         sound_path = tk.StringVar(value=cfg.get("sound_path", ""))
-        ttk.Entry(snd_row, textvariable=sound_path, width=28).pack(side=tk.LEFT, padx=6)
+        ttk.Entry(snd_row, textvariable=sound_path, width=24).pack(side=tk.LEFT, padx=6)
 
         def browse():
             p = filedialog.askopenfilename(title="Choose alert sound",
@@ -158,7 +178,13 @@ class BatteryAlertPlugin(Plugin):
                                            parent=parent.winfo_toplevel())
             if p:
                 sound_path.set(p)
+
+        def test():
+            from signal_companion.core import audio
+            audio.play_sound(sound_path.get().strip() or default_sound_path() or None)
+
         ttk.Button(snd_row, text="Browse…", command=browse).pack(side=tk.LEFT)
+        ttk.Button(snd_row, text="Test", command=test).pack(side=tk.LEFT, padx=(4, 0))
         vars["sound_path"] = sound_path
 
         ttk.Label(parent, text=("Battery is read directly from the headset over USB; works "
