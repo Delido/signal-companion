@@ -135,6 +135,8 @@ class GsiServer(threading.Thread):
         self._httpd = None
 
     def run(self):
+        from signal_companion.core.comutil import ensure_com_initialized
+        ensure_com_initialized()
         handler = type("_BoundHandler", (_Handler,), {"on_state": staticmethod(self.on_state)})
         try:
             self._httpd = ThreadingHTTPServer((self.host, self.port), handler)
@@ -206,6 +208,8 @@ class Cs2GsiPlugin(Plugin):
         })
 
     def _idle_watch(self):
+        from signal_companion.core.comutil import ensure_com_initialized
+        ensure_com_initialized()
         while not self._stop.wait(2.0):
             with _state_lock:
                 connected = _latest_state.get("connected")

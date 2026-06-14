@@ -112,6 +112,13 @@ class TrayApp:
 
 
 def main():
+    # Put the main thread in the multi-threaded COM apartment before anything
+    # else. pycaw/comtypes objects get freed by the cyclic GC on arbitrary
+    # threads; a uniformly-MTA process makes those cross-thread Releases safe
+    # (otherwise the process dies with a native access violation in _ctypes).
+    from signal_companion.core.comutil import ensure_com_initialized
+    ensure_com_initialized()
+
     config_mod.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,

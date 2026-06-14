@@ -96,6 +96,7 @@ class MicDriftLogger(threading.Thread):
                 logging.warning(f"[mic_drift]     new: {cur['reg'].get(k)}")
 
     def run(self):
+        ensure_com_initialized()
         logged_init = False
         while not self._stop.is_set():
             section = self.get_config()

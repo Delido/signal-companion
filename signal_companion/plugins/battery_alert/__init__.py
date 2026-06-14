@@ -51,6 +51,8 @@ class BatteryPoller(threading.Thread):
         self._stop.set()
 
     def run(self):
+        from signal_companion.core.comutil import ensure_com_initialized
+        ensure_com_initialized()
         if not self.spec:
             return
         while not self._stop.is_set():

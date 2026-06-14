@@ -105,6 +105,10 @@ class ProcessWatcher(threading.Thread):
         return names
 
     def run(self):
+        # Join the MTA: this thread enumerates HID via ctypes and can trigger the
+        # cyclic GC that frees pycaw COM objects from other plugins. See comutil.
+        from signal_companion.core.comutil import ensure_com_initialized
+        ensure_com_initialized()
         while not self._stop.is_set():
             section = self.get_config()
             interval = max(0.5, float(section.get("poll_interval_seconds", 2.0)))

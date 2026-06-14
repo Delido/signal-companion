@@ -141,6 +141,7 @@ class HeadsetMicWatcher(threading.Thread):
                 logging.exception("[mic_mute] state callback failed")
 
     def run(self):
+        ensure_com_initialized()
         if not self.spec:
             return
         while not self._stop.is_set():
@@ -241,6 +242,7 @@ class WindowsMicMuteWatcher(threading.Thread):
         self._stop.set()
 
     def run(self):
+        ensure_com_initialized()
         while not self._stop.is_set():
             try:
                 cur = self.mic.get_mute()
