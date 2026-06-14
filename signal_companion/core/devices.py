@@ -41,17 +41,21 @@ SUPPORTED_HEADSETS = {
     # Future: HS80 (mic_register=0xA6, different PID), wired Virtuoso etc.
 }
 
-# Bragi v2 "read property" opcode. SetProperty writes use [.. 0x01 0x02 <prop>];
-# the property *read* command is the 0x02 opcode below. battery level lives at
-# propID 0x0F (confirmed against Corsair_Bragi_Device.js, which skips
-# FetchProperty(0x0F) for wired keyboards "they don't have a battery").
-#
-# VERIFICATION GATE: the exact response offset for the 16-bit value is
-# confirmed by dev_probes/probe_battery.py against the live headset before we
-# rely on it. If the probe shows a different layout, fix BATTERY_* below only.
+# Bragi battery read, verified against the working SignalRGB headset plugin
+# (Corsair_Headset_Controller.js) and confirmed live via dev_probes/probe_battery.py:
+#   command  = [0x02, <wireless_mode>, 0x02, 0x0F, 0x00]   (report-id 0x02 +
+#              conn byte + read-opcode 0x02 + propID 0x0F battery level)
+#   response = the input report whose byte[2] == 0x02 (read-opcode echo); the
+#              device also spams periodic notifications with byte[2] == 0x06.
+#   value    = bytes[4..6] little-endian, in units of 0.1% (so /10 = percent).
 BATTERY_PROP_ID = 0x0F
-BATTERY_READ_CMD = [0x00, 0x00, 0x02, BATTERY_PROP_ID, 0x00]
-BATTERY_VALUE_OFFSET = 4          # response[4:6] little-endian, units of 0.1%
+BATTERY_READ_OPCODE = 0x02         # response byte[2] echoes this on a real read
+BATTERY_VALUE_OFFSET = 4          # response[4:7] little-endian, units of 0.1%
+
+
+def battery_read_cmd(spec):
+    """Bragi battery-level read command for this headset (report-id 0x02)."""
+    return [0x02, spec.get("wireless_mode", 0x09), 0x02, BATTERY_PROP_ID, 0x00]
 
 
 def _is_present(vid: int, pid: int) -> bool:
@@ -146,22 +150,29 @@ def read_battery(spec):
             return None
         report = reports[0]
         out_len = device.hid_caps.output_report_byte_length or 65
+        # Start listening BEFORE sending — the headset also spams periodic
+        # notifications, so we collect a window of reports and pick the real
+        # read response (byte[2] == read-opcode), not just the first one.
+        responses = _listen_input(device)
         payload = bytearray(out_len)
-        for i, b in enumerate(BATTERY_READ_CMD):
+        for i, b in enumerate(battery_read_cmd(spec)):
             if i >= out_len:
                 break
             payload[i] = b
         report.set_raw_data(list(payload))
         if not report.send():
             return None
-        # Read the firmware's response on the command channel's input report.
-        data = _read_input(device)
-        if not data or len(data) < BATTERY_VALUE_OFFSET + 2:
-            return None
-        raw = data[BATTERY_VALUE_OFFSET] | (data[BATTERY_VALUE_OFFSET + 1] << 8)
-        percent = round(raw / 10.0)
-        if 0 <= percent <= 100:
-            return percent
+        import time as _t
+        _t.sleep(1.0)                      # let the response arrive among the noise
+        for data in list(responses):
+            if (len(data) > BATTERY_VALUE_OFFSET + 2
+                    and data[2] == BATTERY_READ_OPCODE):
+                raw = (data[BATTERY_VALUE_OFFSET]
+                       | (data[BATTERY_VALUE_OFFSET + 1] << 8)
+                       | (data[BATTERY_VALUE_OFFSET + 2] << 16))
+                percent = round(raw / 10.0)
+                if 0 <= percent <= 100:
+                    return percent
         return None
     except Exception:
         logging.exception("[devices] read_battery failed")
@@ -173,20 +184,10 @@ def read_battery(spec):
             pass
 
 
-def _read_input(device, timeout_s=0.5):
-    """Grab one input report from a command-channel device. pywinusb delivers
-    input reports via a handler callback; we capture the first one within the
-    timeout window."""
-    import threading
-
-    captured = {"data": None}
-    got = threading.Event()
-
-    def handler(data):
-        if captured["data"] is None:
-            captured["data"] = data
-            got.set()
-
-    device.set_raw_data_handler(handler)
-    got.wait(timeout_s)
-    return captured["data"]
+def _listen_input(device):
+    """Start capturing all input reports from a command-channel device into a
+    list (pywinusb delivers them via a handler callback). Returns the list,
+    which fills as reports arrive."""
+    captured = []
+    device.set_raw_data_handler(lambda data: captured.append(list(data)))
+    return captured
