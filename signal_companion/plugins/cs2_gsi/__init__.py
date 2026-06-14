@@ -14,9 +14,11 @@ See effect/ for the bundled SignalRGB effect and README for install steps.
 """
 import json
 import logging
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -24,6 +26,26 @@ from tkinter import messagebox, ttk
 from signal_companion.core.plugin import Plugin
 from .cfg_installer import install_gsi_cfg, uninstall_gsi_cfg, locate_cs2_cfg_dir
 from .effect_installer import install_effect, uninstall_effect, locate_effects_dir
+
+# The SignalRGB effect sandbox blocks network fetch, but an effect CAN read a
+# file next to itself. So we publish the latest state to this file in the
+# Effects folder and the effect reads it relatively (cs2_state.json).
+STATE_FILE_NAME = "cs2_state.json"
+
+
+def write_state_file(effects_dir, state):
+    """Atomically write `state` to cs2_state.json in `effects_dir`."""
+    if not effects_dir:
+        return
+    try:
+        d = Path(effects_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / STATE_FILE_NAME
+        tmp = d / (STATE_FILE_NAME + ".tmp")
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, dest)
+    except Exception:
+        logging.debug("[cs2] could not write state file", exc_info=True)
 
 # Shared latest-state, guarded by a lock. The HTTP handler writes it from the
 # server thread; GET /state and the EventBus publish read it.
@@ -174,6 +196,7 @@ class Cs2GsiPlugin(Plugin):
         self.server = None
         self._idle_thread = None
         self._stop = threading.Event()
+        self._effects_dir = None
 
     def default_config(self):
         return {
@@ -191,6 +214,13 @@ class Cs2GsiPlugin(Plugin):
             ctx.log.info("disabled")
             return
         _Handler.auth_token = cfg.get("auth_token", "signalcompanion")
+        # Where the SignalRGB effect reads its state file from.
+        try:
+            self._effects_dir = str(locate_effects_dir())
+        except Exception:
+            self._effects_dir = None
+        # Seed an initial file so the effect has something to read immediately.
+        write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
         self.server = GsiServer(cfg.get("host", "127.0.0.1"), int(cfg.get("port", 3000)),
                                 on_state=self._on_state)
         self.server.start()
@@ -201,6 +231,7 @@ class Cs2GsiPlugin(Plugin):
 
     def _on_state(self, state):
         self.ctx.events.publish("cs2.state", state)
+        write_state_file(self._effects_dir, state)
         hp = state.get("health")
         self.ctx.set_status({
             "label": f"CS2: {hp}HP" if hp is not None else "CS2: connected",
@@ -218,12 +249,14 @@ class Cs2GsiPlugin(Plugin):
                     _latest_state["connected"] = False
             if connected and stale:
                 self.ctx.events.publish("cs2.state", {"connected": False})
+                write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
                 self.ctx.set_status({"label": "CS2: idle", "color": (90, 90, 90)})
 
     def stop(self):
         self._stop.set()
         if self.server:
             self.server.stop()
+        write_state_file(self._effects_dir, {"connected": False, "ts": time.time()})
 
     # ── settings tab ──
     def build_settings_tab(self, parent, cfg):
