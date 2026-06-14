@@ -52,6 +52,14 @@ def _read_bundled(name) -> bytes:
             .joinpath("effect", name).read_bytes())
 
 
+def _to_crlf(data: bytes) -> bytes:
+    """Normalize newlines to CRLF. SignalRGB's effect parser reads metadata
+    line-by-line and fails to ACTIVATE effects saved with bare-LF endings, so we
+    force CRLF on install regardless of how the html got stored in the build."""
+    text = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    return text
+
+
 def install_effect(effects_dir=None) -> Path:
     """Copy the bundled effect (html + preview png) into the SignalRGB Effects
     folder. `effects_dir` overrides auto-location. Returns the html path. Raises
@@ -67,6 +75,8 @@ def install_effect(effects_dir=None) -> Path:
                 raise            # the html is mandatory; the png is optional
             logging.warning(f"[cs2] bundled effect file missing, skipped: {name}")
             continue
+        if name.lower().endswith(".html"):
+            data = _to_crlf(data)
         (target / name).write_bytes(data)
         logging.info(f"[cs2] installed effect file → {target / name}")
     return primary

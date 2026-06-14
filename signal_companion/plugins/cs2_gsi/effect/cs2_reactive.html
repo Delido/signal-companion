@@ -1,128 +1,197 @@
-<!doctype html>
-<html>
 <head>
-  <meta charset="utf-8" />
   <title>CS2 Reactive (SignalCompanion)</title>
-  <meta description="Reacts to Counter-Strike 2 via SignalCompanion's GSI bridge: HP gradient, low-HP pulse, flashbang white-out, bomb-planted alarm, team tint." />
+  <meta description="Counter-Strike 2 reactive lighting via SignalCompanion's GSI bridge: HP gradient, low-HP pulse, kill flash, flashbang white-out, smoke/molotov tints, bomb alarm, freeze-time team glow and a visible idle when no match is running." />
   <meta publisher="SignalCompanion" />
-  <meta property="port" label="Bridge port" type="number" min="1" max="65535" default="3000">
-  <meta property="brightness" label="Brightness" type="number" min="0" max="100" default="100">
+  <meta property="port" label="Bridge port" type="number" min="1" max="65535" default="3000" />
+  <meta property="brightness" label="Brightness" type="number" min="0" max="100" default="100" />
+  <meta property="lowHpPulse" label="Low-HP pulse" type="boolean" default="1" />
+  <meta property="killFlash" label="Kill flash" type="boolean" default="1" />
+  <meta property="flashEffect" label="Flashbang white-out" type="boolean" default="1" />
+  <meta property="smokeBurn" label="Smoke & molotov tints" type="boolean" default="1" />
+  <meta property="bombAlarm" label="Bomb-planted alarm" type="boolean" default="1" />
 </head>
-<body style="margin:0; background:#000;">
-  <canvas id="exCanvas" width="320" height="200"></canvas>
-  <script>
-    const canvas = document.getElementById("exCanvas");
-    const ctx = canvas.getContext("2d");
 
-    // SignalRGB injects engine.set/get for properties; fall back to defaults
-    // when previewed in a normal browser.
-    function prop(name, def) {
-      try { return (window.engine && engine.get) ? engine.get(name) : def; }
-      catch (e) { return def; }
-    }
 
-    let state = { connected: false };
-    let lastFetch = 0;
-
-    function applyState(s) {
-      state = (s && typeof s === "object") ? s : { connected: false };
-    }
-
-    // Pull the latest game state from the SignalCompanion bridge. The SignalRGB
-    // effect sandbox may not expose a network API at all — calling a missing
-    // fetch() would throw synchronously and kill the render loop (the effect
-    // then looks "dead" / won't activate). So guard every transport and never
-    // let this throw: worst case we just stay on idle lighting.
-    function poll() {
-      try {
-        const port = prop("port", 3000);
-        const url = `http://127.0.0.1:${port}/state`;
-        if (typeof fetch === "function") {
-          fetch(url, { cache: "no-store" })
-            .then(r => r.json())
-            .then(applyState)
-            .catch(() => { /* bridge down → keep last/idle */ });
-        } else if (typeof XMLHttpRequest === "function") {
-          const x = new XMLHttpRequest();
-          x.open("GET", url, true);
-          x.onreadystatechange = () => {
-            if (x.readyState === 4 && x.status === 200) {
-              try { applyState(JSON.parse(x.responseText)); } catch (e) {}
-            }
-          };
-          x.send();
-        }
-      } catch (e) { /* no network in this sandbox → stay idle, keep rendering */ }
-    }
-
-    function lerp(a, b, t) { return a + (b - a) * t; }
-
-    function teamBase(team) {
-      if (team === "T")  return [60, 28, 6];     // dim amber
-      if (team === "CT") return [6, 22, 50];      // dim blue
-      return [10, 10, 12];
-    }
-
-    function render(now) {
-     try {
-      const bright = prop("brightness", 100) / 100;
-      let r = 0, g = 0, b = 0;
-
-      if (!state.connected) {
-        // Idle breathing white/grey when not in a live match.
-        const p = (Math.sin(now / 1200) + 1) / 2;
-        r = g = b = lerp(8, 26, p);
-      } else {
-        const base = teamBase(state.team);
-        r = base[0]; g = base[1]; b = base[2];
-
-        const hp = (state.health == null) ? 100 : state.health;
-        const alive = hp > 0 && state.activity !== "menu";
-
-        if (alive) {
-          // HP gradient green(full) → red(low).
-          const t = Math.max(0, Math.min(1, hp / 100));
-          r = lerp(220, 30, t);
-          g = lerp(30, 200, t);
-          b = 30;
-          // Low-HP pulse below 35.
-          if (hp <= 35) {
-            const pulse = (Math.sin(now / 180) + 1) / 2;
-            r = lerp(r, 255, pulse * (1 - hp / 35));
-            g = lerp(g, 0, pulse * (1 - hp / 35));
-            b = 0;
-          }
-        } else {
-          // Dead → dim team tint.
-          r *= 0.4; g *= 0.4; b *= 0.4;
-        }
-
-        // Bomb planted → red alarm overrides everything.
-        if (state.bomb === "planted") {
-          const pulse = (Math.sin(now / 140) + 1) / 2;
-          r = lerp(120, 255, pulse); g = lerp(0, 20, pulse); b = 0;
-        }
-
-        // Flashbang → white-out scaled by flashed (0..255).
-        const fl = (state.flashed || 0) / 255;
-        if (fl > 0.02) {
-          r = lerp(r, 255, fl); g = lerp(g, 255, fl); b = lerp(b, 255, fl);
-        }
-      }
-
-      ctx.fillStyle = `rgb(${(r*bright)|0}, ${(g*bright)|0}, ${(b*bright)|0})`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-     } catch (e) { /* never let a frame error stop the loop */ }
-
-      // Poll on a throttle; guarded so a missing/blocked transport can't break
-      // the loop. The loop ALWAYS reschedules so the effect keeps running.
-      if (now - lastFetch > 100) { lastFetch = now; poll(); }
-      requestAnimationFrame(render);
-    }
-
-    // Start the render loop unconditionally (no top-level fetch that could throw
-    // before we ever start drawing).
-    requestAnimationFrame(render);
-  </script>
+<body style="margin: 0; padding: 0; background: #000">
+  <canvas height="200" id="exCanvas" width="320"></canvas>
 </body>
-</html>
+
+<script>
+  // SignalRGB effect. NOTE the required layout: NO <!doctype>/<html> wrapper,
+  // <script> after </body>, and the loop started from onEngineReady() — a
+  // doctype/html wrapper makes SignalRGB fail to ACTIVATE the effect.
+  var canvas, ctx;
+
+  // SignalRGB injects each <meta property> as a GLOBAL of that name. Read the
+  // global; fall back to a default for plain-browser preview. Booleans arrive
+  // as 1/0.
+  function prop(name, def) {
+    try { var v = window[name]; return (v === undefined || v === null) ? def : v; }
+    catch (e) { return def; }
+  }
+  function flag(name) { return !!Number(prop(name, 1)); }
+
+  var state = { connected: false };
+  var lastFetch = 0;
+  var lastTeam = null;
+  var prevRoundKills = null;
+  var killFlashUntil = -1;
+  var disp = [12, 12, 16];   // smoothed displayed colour
+
+  function applyState(s) {
+    state = (s && typeof s === "object") ? s : { connected: false };
+  }
+
+  // Read the latest game state from the bridge. Guarded so a missing/blocked
+  // network transport can never throw out and stall the render loop.
+  function poll() {
+    try {
+      var port = prop("port", 3000);
+      var url = "http://127.0.0.1:" + port + "/state";
+      if (typeof fetch === "function") {
+        fetch(url, { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(applyState)
+          .catch(function () {});
+      } else if (typeof XMLHttpRequest === "function") {
+        var x = new XMLHttpRequest();
+        x.open("GET", url, true);
+        x.onreadystatechange = function () {
+          if (x.readyState === 4 && x.status === 200) {
+            try { applyState(JSON.parse(x.responseText)); } catch (e) {}
+          }
+        };
+        x.send();
+      }
+    } catch (e) {}
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function teamBase(team) {
+    if (team === "T")  return [80, 38, 8];     // amber
+    if (team === "CT") return [10, 34, 78];     // blue
+    return [12, 12, 16];
+  }
+
+  function fill(r, g, b) {
+    r = r < 0 ? 0 : r > 255 ? 255 : r;
+    g = g < 0 ? 0 : g > 255 ? 255 : g;
+    b = b < 0 ? 0 : b > 255 ? 255 : b;
+    ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function computeTarget(now) {
+    // Returns { c:[r,g,b], speed } — the colour to ease toward this frame.
+    var t = [12, 12, 16];
+    var speed = 0.12;
+
+    if (!state.connected) {
+      // Clearly-visible idle breathing (cyan-ish, or last team tint) so the
+      // effect never looks "dead" while waiting for a match.
+      var p = (Math.sin(now / 1400) + 1) / 2;
+      var base = lastTeam ? teamBase(lastTeam) : [4, 40, 60];
+      t = [lerp(base[0], base[0] + 12, p),
+           lerp(base[1] + 30, base[1] + 90, p),
+           lerp(base[2] + 45, base[2] + 130, p)];
+      return { c: t, speed: 0.08 };
+    }
+
+    lastTeam = state.team || lastTeam;
+    var hp = (state.health == null) ? 100 : state.health;
+    var alive = hp > 0 && state.activity !== "menu";
+    var phase = state.round_phase;
+
+    if (!alive) {
+      var d = teamBase(state.team);
+      t = [d[0] * 0.45 + 8, d[1] * 0.45 + 4, d[2] * 0.45 + 8];   // dim team tint
+      speed = 0.1;
+    } else if (phase === "freezetime") {
+      var f = teamBase(state.team);
+      t = [f[0] + 25, f[1] + 45, f[2] + 70];                     // calm team glow
+      speed = 0.1;
+    } else {
+      // HP gradient green(full) → red(low).
+      var k = Math.max(0, Math.min(1, hp / 100));
+      t = [lerp(220, 30, k), lerp(30, 200, k), 30];
+
+      if (flag("lowHpPulse") && hp <= 35) {
+        var pl = (Math.sin(now / 170) + 1) / 2, amt = pl * (1 - hp / 35);
+        t[0] = lerp(t[0], 255, amt); t[1] = lerp(t[1], 0, amt); t[2] = 0;
+        speed = 0.4;
+      }
+      if (flag("smokeBurn") && state.burning) {
+        var bf = (Math.sin(now / 55) + 1) / 2;                   // molotov flicker
+        t[0] = lerp(t[0], 255, 0.6); t[1] = lerp(t[1], 110 + 70 * bf, 0.6); t[2] = 0;
+        speed = 0.5;
+      }
+      if (flag("smokeBurn") && state.smoked) {
+        var avg = (t[0] + t[1] + t[2]) / 3;                      // desaturate
+        t = [lerp(t[0], avg, 0.6), lerp(t[1], avg, 0.6), lerp(t[2], avg, 0.6)];
+      }
+    }
+
+    // Bomb planted alarm overrides the base colour while it's live.
+    if (flag("bombAlarm") && state.bomb === "planted") {
+      var pb = (Math.sin(now / 130) + 1) / 2;
+      t = [lerp(120, 255, pb), lerp(0, 25, pb), 0];
+      speed = 0.5;
+    }
+
+    // Flashbang white-out scales with how flashed you are.
+    if (flag("flashEffect")) {
+      var fl = (state.flashed || 0) / 255;
+      if (fl > 0.02) {
+        t = [lerp(t[0], 255, fl), lerp(t[1], 255, fl), lerp(t[2], 255, fl)];
+        speed = 0.6;
+      }
+    }
+
+    return { c: t, speed: speed };
+  }
+
+  function render(now) {
+   try {
+    var bright = prop("brightness", 100) / 100;
+
+    // Kill detection (round_kills increases) → brief bright flash.
+    if (flag("killFlash") && state.connected) {
+      if (prevRoundKills != null && state.round_kills != null &&
+          state.round_kills > prevRoundKills) {
+        killFlashUntil = now + 300;
+      }
+      prevRoundKills = state.round_kills;
+    } else {
+      prevRoundKills = state.round_kills;
+    }
+
+    var tgt = computeTarget(now);
+    var t = tgt.c, speed = tgt.speed;
+
+    // Kill flash overlay on top (snappy, bright).
+    if (now < killFlashUntil) {
+      var kf = (killFlashUntil - now) / 300;          // 1 → 0
+      t = [lerp(t[0], 255, kf), lerp(t[1], 255, kf), lerp(t[2], 255, kf)];
+      speed = 0.7;
+    }
+
+    disp[0] = lerp(disp[0], t[0], speed);
+    disp[1] = lerp(disp[1], t[1], speed);
+    disp[2] = lerp(disp[2], t[2], speed);
+
+    fill(disp[0] * bright, disp[1] * bright, disp[2] * bright);
+   } catch (e) { /* never let a frame error stop the loop */ }
+
+   if (now - lastFetch > 100) { lastFetch = now; poll(); }
+   window.requestAnimationFrame(render);
+  }
+
+  // SignalRGB entry point — required for the effect to activate.
+  function onEngineReady() {
+    canvas = document.getElementById("exCanvas");
+    ctx = canvas.getContext("2d");
+    window.requestAnimationFrame(render);
+  }
+</script>
+</head>
