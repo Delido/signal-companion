@@ -4,6 +4,7 @@ site_description: >-
   plugin sandbox leaves: Windows audio, process watching, network/game
   integration and direct HID, via drop-in plugins.
 site_author: Sebastian Mendyka
+site_url: https://delido.github.io/signal-companion/
 repo_url: https://github.com/Delido/signal-companion
 repo_name: Delido/signal-companion
 edit_uri: edit/main/docs/
