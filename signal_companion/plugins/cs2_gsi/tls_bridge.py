@@ -164,6 +164,12 @@ class HttpsStateServer(threading.Thread):
         get_state = self.get_state
 
         class H(BaseHTTPRequestHandler):
+            # HTTP/1.1 keep-alive so the effect reuses one TLS connection for its
+            # ~10 polls/s instead of a fresh (expensive, flaky) TLS handshake
+            # each time — that unreliability is why the effect only reacted now
+            # and then.
+            protocol_version = "HTTP/1.1"
+
             def log_message(self, *a):
                 pass
 
@@ -173,6 +179,8 @@ class HttpsStateServer(threading.Thread):
                 self.send_header("Access-Control-Allow-Private-Network", "true")
                 self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "*")
+                # Cache the (Private Network Access) preflight so most GETs skip it.
+                self.send_header("Access-Control-Max-Age", "600")
                 self.send_header("Vary", "Origin")
 
             def do_GET(self):
@@ -187,6 +195,7 @@ class HttpsStateServer(threading.Thread):
             def do_OPTIONS(self):
                 self.send_response(204)
                 self._cors()
+                self.send_header("Content-Length", "0")
                 self.end_headers()
 
         try:
