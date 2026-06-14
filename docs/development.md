@@ -1,0 +1,110 @@
+# Development & building
+
+## Running from source
+
+```powershell
+pip install -r signal_companion/requirements.txt
+python -m signal_companion                    # tray
+python -m signal_companion.app --settings     # settings only
+```
+
+Run from the repo root so `signal_companion` is importable as a top-level
+package.
+
+## Building the exe
+
+```powershell
+build_signalcompanion.bat        # -> dist\SignalCompanion.exe
+```
+
+The batch file runs PyInstaller through `SignalCompanion.spec` with
+`--noconfirm --clean`. It prefers the per-user PyInstaller install and falls
+back to `python -m PyInstaller`.
+
+### What the spec does
+
+Plugins are imported **dynamically** (`pkgutil` over the `plugins` package), so
+PyInstaller's static analysis can't see them. The spec therefore:
+
+1. Puts the repo root on `sys.path` **before** collecting, so `collect_submodules`
+   can actually import and enumerate the package.
+2. `collect_submodules("signal_companion.plugins")` → hidden imports for every
+   plugin module (with an `assert` guard so the build fails loudly if it ever
+   comes up empty again).
+3. `collect_submodules("ttkbootstrap")` → the themed UI works frozen.
+4. `collect_data_files(..., includes=["**/*.html", "**/*.md", "**/*.cfg"])` →
+   ships the CS2 effect HTML and READMEs.
+
+!!! warning "Why the `sys.path` insert matters"
+    `collect_submodules` runs at **spec-evaluation time**, before Analysis
+    applies `pathex`. If the repo root isn't on `sys.path` at that moment it
+    silently returns `[]`, the plugin modules are left out, and the frozen app
+    discovers **zero plugins** — an empty Settings notebook with no error. The
+    spec inserts `SPECPATH` onto `sys.path` to prevent exactly that.
+
+### Runtime plugin discovery (frozen)
+
+In a frozen build the plugin modules live in the embedded PYZ, not on disk, so
+`pkgutil.iter_modules` can return nothing even when the modules are present.
+`core/manager.py` handles this: it tries `pkgutil.iter_modules` first and, when
+frozen and empty, falls back to reading the PyInstaller PYZ table of contents
+(`pyimod02_importers.get_pyz_toc_tree()`). It also logs a warning if **no**
+plugins are discovered, so a regression is obvious in `watcher.log`.
+
+### Verifying a build
+
+After building, the frozen app should log all plugins on startup:
+
+```
+[manager] loaded plugin 'battery-alert' (Battery Alert v1.0.0)
+[manager] loaded plugin 'cs2-gsi' (CS2 Integration v1.0.0)
+[manager] loaded plugin 'game-mode' (Game Mode v2.0.0)
+[manager] loaded plugin 'mic-drift' (Mic Drift Logger v2.0.0)
+[manager] loaded plugin 'mic-mute-mirror' (Mic Mute Mirror v2.0.0)
+```
+
+A quick check of the settings UI without the tray:
+
+```powershell
+.\dist\SignalCompanion.exe --settings
+```
+
+You should see five tabs and **no** stray empty `tk` window.
+
+!!! note "OneDrive can lock the build folder"
+    This repo lives under OneDrive. If `--clean` fails with
+    `PermissionError ... build\...\localpycs`, delete `build\` and rebuild —
+    OneDrive sometimes holds a transient lock.
+
+## dev_probes/ { #dev-probes }
+
+One-shot HID / audio diagnostic scripts used to reverse-engineer the device
+protocols. They are **not** part of the shipped app — run them directly with
+Python while developing.
+
+- `probe_battery.py` confirms the battery read framing before
+  [Battery Alert](plugins/battery-alert.md) relies on it.
+
+## Verification gates { #verification-gates }
+
+Two things depend on real hardware / CS2 and should be confirmed on the target
+setup:
+
+1. **Battery read framing.** `BATTERY_READ_CMD` / `BATTERY_VALUE_OFFSET` in
+   `core/devices.py` are best-guess. Run `dev_probes/probe_battery.py` against
+   the live headset and fix those constants if needed. (The battery property id
+   `0x0F` is confirmed; the response offset is not.)
+2. **CS2 effect fetch.** Whether a SignalRGB *effect* can `fetch
+   http://127.0.0.1` is unconfirmed. If blocked, switch the bridge transport
+   (file-watch or WebSocket) without touching the receiver. See
+   [SignalRGB effect](signalrgb-effect.md#if-fetch-is-blocked).
+
+## Building the docs
+
+These docs are MkDocs (Material theme):
+
+```powershell
+pip install mkdocs-material
+mkdocs serve     # live preview at http://127.0.0.1:8000
+mkdocs build     # static site in site/
+```

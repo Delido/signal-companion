@@ -1,0 +1,76 @@
+site_name: SignalCompanion
+site_description: >-
+  Extensible tray companion for SignalRGB — fills the gaps the SignalRGB/iCUE
+  plugin sandbox leaves: Windows audio, process watching, network/game
+  integration and direct HID, via drop-in plugins.
+site_author: Sebastian Mendyka
+repo_url: https://github.com/Delido/signal-companion
+repo_name: Delido/signal-companion
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Architecture: architecture.md
+  - Plugins:
+      - plugins/index.md
+      - Game Mode: plugins/game-mode.md
+      - Mic Mute Mirror: plugins/mic-mute-mirror.md
+      - Mic Drift Logger: plugins/mic-drift.md
+      - Battery Alert: plugins/battery-alert.md
+      - CS2 Integration: plugins/cs2-integration.md
+  - SignalRGB effect: signalrgb-effect.md
+  - Devices: devices.md
+  - Writing a plugin: writing-a-plugin.md
+  - Development & building: development.md

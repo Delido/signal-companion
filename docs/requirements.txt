@@ -1,0 +1,5 @@
+# Documentation toolchain (not needed to run SignalCompanion).
+#   pip install -r docs/requirements.txt
+#   mkdocs serve   # live preview
+#   mkdocs build   # static site -> site/
+mkdocs-material

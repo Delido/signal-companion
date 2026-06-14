@@ -10,3 +10,6 @@ __pycache__/
 
 # Local diagnostic captures (kept out of the published repo)
 dumps/
+
+# MkDocs build output (docs source under docs/ + mkdocs.yml ARE tracked)
+site/

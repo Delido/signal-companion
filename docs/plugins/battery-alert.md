@@ -1,0 +1,69 @@
+# Battery Alert
+
+> id: `battery-alert` · version 1.0.0
+
+Polls the headset battery over USB and plays a sound when the level drops below
+a configurable threshold.
+
+## What it does
+
+- Reads the battery level via the Bragi read-property roundtrip
+  (`core.devices.read_battery`) on an interval (default 60 s).
+- Publishes `headset.battery` (`int` percent) on the EventBus and shows the
+  level in the tray (red when at/below threshold).
+- When the level crosses **below** the threshold, plays an alert sound. A
+  hysteresis band prevents repeat alerts while the level hovers at the
+  threshold; an optional re-alert interval repeats the alert if the battery
+  keeps draining without being charged.
+
+The battery is read directly from the headset over USB, so it works alongside
+SignalRGB and iCUE without conflict.
+
+## Settings
+
+| Setting | Default | Notes |
+|---|---|---|
+| Enable low-battery sound alert | on | Master switch. |
+| Headset | Auto-detect | Must be a battery-capable [supported headset](../devices.md). |
+| Alert threshold (%) | 20 | 1–99. |
+| Poll interval (seconds) | 60.0 | Minimum 15 s. |
+| Re-alert every (minutes) | 30.0 | `0` = alert once per crossing only. |
+| Sound (.wav) | *(empty)* | Empty = Windows system beep. Browse to pick a `.wav`. |
+
+## Config keys
+
+```json
+"battery-alert": {
+  "enabled": true,
+  "device": "auto",
+  "threshold": 20,
+  "poll_interval_seconds": 60.0,
+  "re_alert_minutes": 30.0,
+  "sound_path": ""
+}
+```
+
+## Hysteresis & re-alerts
+
+- The "below threshold" latch only clears once the level climbs **more than 5
+  points** above the threshold (i.e. you actually started charging). This stops
+  flapping when the reading sits right on the line.
+- While below threshold, the alert repeats every `re_alert_minutes`. Set it to
+  `0` to alert only once each time you cross down.
+
+## Verification gate
+
+!!! warning "Battery read framing is probe-verified hardware-specific"
+    The battery **property id** (`0x0F`) is confirmed, but the exact response
+    offset for the 16-bit value (`BATTERY_READ_CMD` / `BATTERY_VALUE_OFFSET` in
+    `core/devices.py`) is a best guess until validated against the live headset.
+    Run `dev_probes/probe_battery.py` to confirm the framing and, if needed, fix
+    only those constants. See [Development](../development.md#verification-gates).
+
+## Troubleshooting
+
+- **No battery shown** — log shows
+  `battery: no battery-capable headset (inactive)`: the selected headset either
+  isn't present or isn't flagged `supports_battery` in the registry.
+- **Wrong percentage** — almost certainly the response-offset gate above; run
+  the probe.
