@@ -1,93 +1,102 @@
 # SignalRGB effect (CS2 Reactive)
 
 The lighting half of the [CS2 Integration](plugins/cs2-integration.md) is a
-SignalRGB **effect** — ordinary web content rendered by SignalRGB that reads the
-companion's `/state` endpoint and paints a reactive colour onto a `<canvas>`.
+SignalRGB **effect** — web content rendered by SignalRGB that reads the live CS2
+state from SignalCompanion and paints reactive lighting onto a `<canvas>` which
+SignalRGB samples across your devices.
 
 It lives at `signal_companion/plugins/cs2_gsi/effect/cs2_reactive.html`.
 
-!!! info "The canvas already exists"
-    A common question: *"isn't the SignalRGB canvas still missing?"* — No. The
-    bundled effect already contains a complete SignalRGB canvas
-    (`<canvas id="exCanvas" width="320" height="200">`), uses SignalRGB's
-    `engine.get(...)` property API, and declares its adjustable properties via
-    `<meta property=...>` tags. It renders a single device-wide reactive colour.
-    What's *not* yet confirmed is whether SignalRGB's effect sandbox allows the
-    `fetch` to localhost (see [below](#if-fetch-is-blocked)) — that's the open
-    item, not the canvas itself.
+## How the effect gets the data (the hard part)
 
-## How it's structured
+SignalRGB runs effects in **Ultralight** (a WebKit engine) from a **public HTTPS
+origin** (`https://signalrgbmarketplace.pages.dev/`), even for a local effect.
+That sandbox blocks every obvious local transport — confirmed via the SignalRGB
+console:
 
-```html
-<meta property="port"       label="Bridge port" type="number" min="1" max="65535" default="3000">
-<meta property="brightness" label="Brightness"  type="number" min="0" max="100"  default="100">
-...
-<canvas id="exCanvas" width="320" height="200"></canvas>
-```
+- `http://127.0.0.1` → **mixed-content blocked** (`was not allowed to display
+  insecure content`),
+- a self-signed `https://127.0.0.1` → **rejected** (Ultralight trusts only its
+  own bundled `cacert.pem`, not the Windows store),
+- `file://` and relative paths → blocked / resolve to the remote marketplace.
 
-- The `<meta property>` tags become user-adjustable controls in SignalRGB's
-  effect properties panel.
-- `engine.get("port")` / `engine.get("brightness")` read those values at
-  runtime; the effect falls back to defaults when opened in a plain browser, so
-  you can preview it outside SignalRGB.
-- A `requestAnimationFrame` loop polls `http://127.0.0.1:<port>/state` ~10×/s and
-  fills the whole canvas with the colour for the current game state. SignalRGB
-  samples that canvas onto your devices.
+The stock **Weather effect** is the clue: it `fetch`es a *public* HTTPS API, so
+effects *can* do HTTPS — just not to an untrusted localhost. So SignalCompanion
+runs a small **HTTPS bridge** the effect can reach:
+
+1. it generates a local CA + a `127.0.0.1` certificate (`cryptography`),
+2. **appends the CA to Ultralight's `cacert.pem`** (`%LOCALAPPDATA%\VortxEngine\
+   app-*\Signal-x64\cacert.pem` — user-writable, no admin; idempotent, keeps a
+   `.bak`, re-applied on startup so SignalRGB updates that replace the bundle
+   get re-trusted),
+3. serves `GET/POST /state` over **HTTPS** with CORS + the Private-Network-Access
+   header + `Cache-Control: no-store`,
+4. the effect **POSTs** to `https://127.0.0.1:3443/state` (POST so Ultralight
+   can't serve a cached/frozen response).
+
+CS2 still POSTs its Game State to the plain-HTTP receiver on `:3000`; the effect
+reads the HTTPS bridge on `:3443`. See [tls_bridge / receiver](plugins/cs2-integration.md).
+
+!!! warning "One-time setup: restart SignalRGB once"
+    After SignalCompanion first patches `cacert.pem`, **SignalRGB must be
+    restarted once** so Ultralight reloads the bundle and trusts the bridge
+    certificate. Until then the effect shows its idle colour and doesn't react.
 
 ## What it shows
 
+Pure GSI data drives it (no screen capture):
+
 | Situation | Lighting |
-|---|---|
-| Idle / no match | slow grey breathing |
-| Alive | green → red gradient by HP |
-| HP ≤ 35 | red pulse, intensity scales as HP drops |
-| Flashbang | white-out scaled by flash amount |
-| Bomb planted | fast red alarm (overrides HP) |
-| Dead | dim team tint (T amber / CT blue) |
+| --- | --- |
+| No match / between rounds | gentle team-tinted (or cyan) breathing |
+| Alive | HP gradient green (full) → red (low), brighter centre |
+| HP ≤ 35 | red pulse on the edges |
+| Kill | brief white flash |
+| Flashbang | full white-out, fades with the flash amount |
+| Smoke / molotov | desaturated / orange flicker |
+| Bomb planted | red tick that **accelerates over the ~40 s C4 fuse** |
+| Bomb exploded / defused | orange-white explosion / green defuse flash |
+| Round won / lost | green / red flash |
+| Dead | black closes in **from the edges to the centre**, then a faint spectating glow until respawn |
+
+## Configuration (SignalRGB effect properties)
+
+All adjustable in SignalRGB's effect panel:
+
+- **Brightness**
+- **Health bar (instead of full glow)** — switch to a positionable bar on black
+  whose length tracks HP, with **Health bar color / X / Y / Width / Height**
+- Individual toggles: **Low-HP edge pulse**, **Kill flash**, **Flashbang
+  white-out**, **Smoke and molotov tints**, **Bomb tick and explosion**, **Round
+  win / loss flash**, **Death fade to black**
 
 ## Install
 
-The CS2 Integration settings tab installs the effect for you:
-
-1. Set up the receiver first — see
+1. Set up the receiver + GSI config first — see
    [CS2 Integration → Setup](plugins/cs2-integration.md#setup).
 2. In **Settings → CS2 Integration**, under *2) SignalRGB effect*, click
-   **Install effect to SignalRGB**. This copies `cs2_reactive.html` into your
-   SignalRGB Effects folder (auto-located, honouring OneDrive/Documents
-   redirection). **Uninstall** removes it again.
-3. In SignalRGB, apply the **CS2 Reactive** effect to a layer.
+   **Install effect to SignalRGB** (copies `cs2_reactive.html` + the
+   `cs2_reactive.png` thumbnail into your SignalRGB Effects folder, auto-located
+   honouring OneDrive/Documents redirection). **Uninstall** removes them.
+3. **Restart SignalRGB once** (so it trusts the bridge cert — see the warning
+   above), then apply the **CS2 Reactive** effect to a layer.
 4. Make sure SignalCompanion is running, launch CS2, join a match.
 
-!!! note "Manual install still works"
-    If you'd rather do it by hand, copy **both** `cs2_reactive.html` and
-    `cs2_reactive.png` into `Documents\WhirlwindFX\Effects\`, or import the html
-    via **SignalRGB → Effects → Add**.
+!!! note "Effect HTML is cached hard"
+    SignalRGB caches the effect HTML — a changed effect only loads after a full
+    SignalRGB restart. The effect logs `CS2 Reactive vX.Y loaded` to the
+    SignalRGB console so you can confirm which build is running.
 
-!!! info "Library thumbnail"
-    SignalRGB shows a per-effect thumbnail from a `.png` with the same base name
-    as the `.html`. The bundled `cs2_reactive.png` provides it — without it the
-    library shows a broken-image placeholder. The installer copies it for you.
+## Effect implementation notes
 
-## Tuning
+Gotchas baked into the effect (for anyone editing it):
 
-The effect exposes two properties in SignalRGB:
-
-- **Bridge port** — must match the plugin's listen port (default 3000).
-- **Brightness** — 0–100 scale applied to the output.
-
-## If `fetch` is blocked { #if-fetch-is-blocked }
-
-If `http://127.0.0.1:3000/state` returns live JSON in a browser **but the effect
-never reacts**, SignalRGB's effect sandbox is blocking the `fetch`. The receiver
-doesn't need to change — only the transport between it and the effect:
-
-- **File watch** — have the plugin also write the latest state to a file the
-  effect can read.
-- **WebSocket** — expose the state over a WS the effect connects to.
-
-Either swap is isolated to the bridge; the GSI parsing, schema and EventBus
-publishing stay exactly as they are.
-
-!!! tip "Keep the bridge dead simple"
-    A sister project saw hard-to-tame race conditions with SignalRGB web content
-    under WebView2. Prefer the simplest transport that works.
+- **No `<!doctype>`/`<html>` wrapper** and the `<script>` after `</body>` — a
+  doctype wrapper stops SignalRGB from activating the effect at all.
+- **Start the render loop at top level**, not from `onEngineReady()` — current
+  SignalRGB builds don't call it (matches SignalRGB's own Solid Color / Rainbow).
+- **NaN-safe rendering** — one NaN in the smoothing once froze the canvas to
+  black permanently while the loop kept running.
+- Read `<meta property>` values as **injected globals** (`window.brightness`…),
+  not `engine.get(...)`. Never put a bare `&` in a meta label (breaks the
+  property parser).

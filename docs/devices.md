@@ -44,26 +44,33 @@ Per-headset protocol constants (Virtuoso XT):
 | `wireless_mode` | `0x09` | connection-mode byte (wired = `0x08`) |
 | `supports_battery` | `true` | enables Battery Alert |
 
-## Battery read (Bragi)
+## Battery read (Bragi) — verified
 
-Battery uses the Bragi v2 "read property" roundtrip on the command channel:
+Battery uses the Bragi "read property" roundtrip on the command channel:
 
 ```python
-BATTERY_PROP_ID     = 0x0F                       # confirmed
-BATTERY_READ_CMD    = [0x00, 0x00, 0x02, 0x0F, 0x00]
-BATTERY_VALUE_OFFSET = 4    # response[4:6] little-endian, units of 0.1%
+BATTERY_PROP_ID      = 0x0F   # battery property
+BATTERY_READ_OPCODE  = 0x02   # read opcode (also echoed in response byte[2])
+BATTERY_VALUE_OFFSET = 4      # response[4:7] little-endian, units of 0.1%
+
+def battery_read_cmd(spec):
+    # report-id 0x02 + conn byte (wireless 0x09 / wired 0x08) + opcode + propID
+    return [0x02, spec.get("wireless_mode", 0x09), 0x02, BATTERY_PROP_ID, 0x00]
 ```
 
-`read_battery(spec)` sends the command, captures one input report via a
-pywinusb raw-data handler, and decodes `response[offset:offset+2]` as a
-little-endian value in units of 0.1 %, rounded to an integer percent.
+`read_battery(spec)` sends the command, listens for **all** input reports for
+~1 s, then picks the **read response** — the report whose `byte[2] == 0x02`
+(the read-opcode echo), *not* the periodic `byte[2] == 0x06` notifications — and
+decodes `bytes[4..6]` little-endian ÷ 10 as an integer percent.
 
-!!! warning "Open verification gate"
-    `BATTERY_PROP_ID` (`0x0F`) is confirmed against Corsair's
-    `Corsair_Bragi_Device.js`. The **response offset** is a best guess until
-    validated on the live headset with `dev_probes/probe_battery.py`. If the
-    probe shows a different layout, fix only `BATTERY_READ_CMD` /
-    `BATTERY_VALUE_OFFSET`. See [Development](development.md#verification-gates).
+!!! success "Verified on the live headset (reads 82%)"
+    Confirmed against the user's SignalRGB plugin
+    [`Corsair_Headset_Controller.js`](https://github.com/Delido/signalrgb-plugins/blob/main/Corsair_Headset_Controller.js)
+    and live via `dev_probes/probe_battery.py`. The earlier
+    `[0x00,0x00,0x02,0x0F,0x00]` command was wrong, and grabbing the *first*
+    input report caught a notification (≈0%) instead of the real response — both
+    fixed. Works even with SignalRGB open, since HID IN reports broadcast to all
+    readers.
 
 ## Adding a device
 

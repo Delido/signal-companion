@@ -96,10 +96,19 @@ A quick check of the settings UI without the tray:
 
 You should see five tabs and **no** stray empty `tk` window.
 
-!!! note "OneDrive can lock the build folder"
-    This repo lives under OneDrive. If `--clean` fails with
-    `PermissionError ... build\...\localpycs`, delete `build\` and rebuild —
-    OneDrive sometimes holds a transient lock.
+!!! note "OneDrive locks the build folder — build to %TEMP%"
+    This repo lives under OneDrive, which **persistently** locks
+    `build\…\localpycs` and `dist\…\cryptography\bindings`. Reliable workaround —
+    build entirely outside OneDrive, then copy into the installed app:
+
+    ```powershell
+    python -m PyInstaller --noconfirm --clean `
+        --workpath $env:TEMP\scbuild --distpath $env:TEMP\scdist SignalCompanion.spec
+    # then, for the installer, point ISCC at the temp dist:
+    ISCC /DSourceDir=$env:TEMP\scdist\SignalCompanion installer\SignalCompanion.iss
+    ```
+
+    The `.iss` `#ifndef`-guards `SourceDir` so this override works.
 
 ## dev_probes/ { #dev-probes }
 
@@ -107,22 +116,30 @@ One-shot HID / audio diagnostic scripts used to reverse-engineer the device
 protocols. They are **not** part of the shipped app — run them directly with
 Python while developing.
 
-- `probe_battery.py` confirms the battery read framing before
-  [Battery Alert](plugins/battery-alert.md) relies on it.
+- `probe_battery.py` confirms the battery read framing — it sends
+  `[0x02, mode, 0x02, 0x0F, 0x00]` and dumps the distinct responses so you can
+  see the `byte[2] == 0x02` read reply among the `0x06` notifications.
+- `fake_cs2_feed.py` drives the **HTTPS bridge** with a synthetic match
+  (full HP → low HP → bomb → explode/defuse → flash → dead → win/loss) so the
+  effect can be developed without launching CS2. `fake_cs2_feed_http.py` is the
+  plain-HTTP counterpart that was used to *prove* http is mixed-content blocked.
 
-## Verification gates { #verification-gates }
+## Verification gates (both resolved) { #verification-gates }
 
-Two things depend on real hardware / CS2 and should be confirmed on the target
-setup:
+The two hardware/CS2-dependent unknowns are now **confirmed on the target
+setup**:
 
-1. **Battery read framing.** `BATTERY_READ_CMD` / `BATTERY_VALUE_OFFSET` in
-   `core/devices.py` are best-guess. Run `dev_probes/probe_battery.py` against
-   the live headset and fix those constants if needed. (The battery property id
-   `0x0F` is confirmed; the response offset is not.)
-2. **CS2 effect fetch.** Whether a SignalRGB *effect* can `fetch
-   http://127.0.0.1` is unconfirmed. If blocked, switch the bridge transport
-   (file-watch or WebSocket) without touching the receiver. See
-   [SignalRGB effect](signalrgb-effect.md#if-fetch-is-blocked).
+1. **Battery read framing — RESOLVED.** Reads 82% correctly. Command
+   `[0x02, wireless_mode, 0x02, 0x0F, 0x00]`, response selected by
+   `byte[2] == 0x02`, value `bytes[4..6]` LE ÷ 10. Verified against
+   `Corsair_Headset_Controller.js` and `dev_probes/probe_battery.py`. See
+   [Devices → Battery read](devices.md#battery-read-bragi-verified).
+2. **CS2 effect transport — RESOLVED.** A SignalRGB effect *cannot* fetch
+   `http://127.0.0.1` (mixed content from its HTTPS origin), so SignalCompanion
+   runs an **HTTPS bridge** on `:3443` whose CA it appends to SignalRGB's
+   `cacert.pem`; the effect POSTs to it and reacts live after a one-time
+   SignalRGB restart. See
+   [SignalRGB effect](signalrgb-effect.md#how-the-effect-gets-the-data-the-hard-part).
 
 ## Building the docs
 

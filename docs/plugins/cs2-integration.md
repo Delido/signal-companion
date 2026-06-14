@@ -10,23 +10,32 @@ Receives **Counter-Strike 2 Game State Integration** (GSI) and exposes it so a
 
 SignalRGB *device plugins* are sandboxed and can't open sockets. CS2 needs to
 POST game state to a local HTTP endpoint. So SignalCompanion is the **network
-receiver**, and a SignalRGB *effect* (ordinary web content, which can `fetch`
-localhost) reads the state back out.
+receiver**. Reading the state back into a SignalRGB *effect* turned out to be
+the hard part: effects run from a **public HTTPS origin**, so they can't fetch
+plain `http://localhost` (mixed-content blocked). The fix is a second, **HTTPS**
+endpoint whose certificate SignalCompanion makes SignalRGB trust — the full
+story is on the **[SignalRGB effect](../signalrgb-effect.md)** page.
 
 ```
-CS2  ──(GSI POST)──▶  SignalCompanion (cs2-gsi plugin, http://127.0.0.1:3000)
-                                  │  serves GET /state (JSON, CORS-open)
-                                  ▼
-                      cs2_reactive.html  ──▶  SignalRGB canvas → your devices
+CS2  ──(GSI POST :3000 http)──▶  SignalCompanion (cs2-gsi plugin)
+                                       │  HTTP receiver  :3000  (CS2 → us)
+                                       │  HTTPS bridge   :3443  (effect ← us)
+                                       ▼
+        cs2_reactive.html  ──(POST :3443 https)──▶  SignalRGB canvas → devices
 ```
 
 ## What the plugin does
 
-- Runs a `ThreadingHTTPServer` (default `127.0.0.1:3000`).
+- Runs a `ThreadingHTTPServer` on `127.0.0.1:3000` (plain HTTP) that **CS2**
+  POSTs Game State to.
 - Accepts CS2's POSTs, validates the auth token, and parses the body into a
   flat, effect-friendly schema (`health`, `armor`, `flashed`, `bomb`, `team`,
-  `round_phase`, `weapon`, `kills`, …).
-- Serves the latest state as `GET /state` (CORS-open) for the effect.
+  `round_phase`, `weapon`, `kills`, `win_team`, …).
+- Runs an **HTTPS bridge** on `127.0.0.1:3443` (`tls_bridge`) that serves the
+  latest state on `GET/POST /state` (CORS-open, Private-Network-Access header,
+  `Cache-Control: no-store`) — this is what the **effect** reads. On startup it
+  generates a local CA + cert and appends the CA to SignalRGB's Ultralight
+  `cacert.pem` so the effect trusts it (one-time SignalRGB restart needed).
 - Publishes `cs2.state` on the EventBus for other plugins.
 - A watchdog flips the state to `connected: false` if CS2 stops POSTing
   (game closed), so the lighting returns to idle.
@@ -40,16 +49,17 @@ CS2  ──(GSI POST)──▶  SignalCompanion (cs2-gsi plugin, http://127.0.0.
    **Restart CS2** afterwards. (**Uninstall** removes the cfg again.)
 2. Under *2) SignalRGB effect*, click **Install effect to SignalRGB** to copy
    the effect into your SignalRGB Effects folder — see
-   **[SignalRGB effect](../signalrgb-effect.md)**. Then apply the *CS2 Reactive*
+   **[SignalRGB effect](../signalrgb-effect.md)**. **Restart SignalRGB once**
+   (so it trusts the HTTPS bridge certificate), then apply the *CS2 Reactive*
    effect to a layer in SignalRGB.
 3. Make sure SignalCompanion is running, then launch CS2 and join a match.
 
 ## Settings
 
 | Setting | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Enable CS2 Game State receiver | on | Master switch. |
-| Listen port | 3000 | Must match the port in the effect's properties. |
+| Listen port | 3000 | HTTP port CS2 POSTs to (must match the GSI cfg). The HTTPS bridge the effect reads is fixed at 3443. |
 | Auth token | `signalcompanion` | Shared secret; written into the GSI cfg and checked on every POST. |
 
 The tab shows the auto-located CS2 cfg folder and has the
@@ -70,7 +80,9 @@ The tab shows the auto-located CS2 cfg folder and has the
 
 ## The `/state` schema
 
-`GET http://127.0.0.1:3000/state` returns the latest parsed state, e.g.:
+The HTTPS bridge `https://127.0.0.1:3443/state` (and, for debugging,
+`http://127.0.0.1:3000/state` in a browser) returns the latest parsed state,
+e.g.:
 
 ```json
 {
@@ -80,7 +92,7 @@ The tab shows the auto-located CS2 cfg folder and has the
   "flashed": 0, "smoked": 0, "burning": 0,
   "round_kills": 0,
   "team": "CT", "activity": "playing",
-  "round_phase": "live", "bomb": null,
+  "round_phase": "live", "bomb": null, "win_team": null,
   "map_phase": "live", "round": 4,
   "weapon": "weapon_ak47", "ammo_clip": 30, "ammo_reserve": 90,
   "kills": 7, "deaths": 3
@@ -90,12 +102,16 @@ The tab shows the auto-located CS2 cfg folder and has the
 When CS2 isn't connected (or after the idle watchdog fires), it returns
 `{"connected": false, ...}`.
 
-## Verification gate
+The effect **POSTs** to the HTTPS bridge (POST, not GET, so Ultralight can't
+freeze a cached response). The browser GET above is only for sanity-checking the
+receiver.
 
-!!! warning "Can a SignalRGB effect `fetch` localhost?"
-    Device plugins are sandboxed without network; effects are ordinary web
-    content and *most likely can* fetch. This is unconfirmed on your setup. If
-    `http://127.0.0.1:3000/state` returns live JSON in a browser but the effect
-    never reacts, the effect sandbox is blocking the `fetch` — switch the bridge
-    transport (file-watch or WebSocket) **without changing the receiver**. See
-    the [SignalRGB effect page](../signalrgb-effect.md#if-fetch-is-blocked).
+## Confirmed working
+
+!!! success "The transport is solved"
+    The effect reaching the bridge was the central problem and is **resolved**:
+    plain `http://localhost` is mixed-content blocked from the effect's HTTPS
+    origin, so SignalCompanion runs an HTTPS bridge whose CA it appends to
+    SignalRGB's `cacert.pem`. After a one-time SignalRGB restart the effect
+    reacts live. The mechanism is documented on the
+    [SignalRGB effect page](../signalrgb-effect.md#how-the-effect-gets-the-data-the-hard-part).

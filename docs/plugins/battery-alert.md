@@ -22,7 +22,7 @@ SignalRGB and iCUE without conflict.
 ## Settings
 
 | Setting | Default | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Enable low-battery sound alert | on | Master switch. |
 | Headset | Auto-detect | Must be a battery-capable [supported headset](../devices.md). |
 | Alert threshold (%) | 20 | 1–99. |
@@ -56,19 +56,30 @@ Windows system beep.
 - While below threshold, the alert repeats every `re_alert_minutes`. Set it to
   `0` to alert only once each time you cross down.
 
-## Verification gate
+## Battery read framing (resolved)
 
-!!! warning "Battery read framing is probe-verified hardware-specific"
-    The battery **property id** (`0x0F`) is confirmed, but the exact response
-    offset for the 16-bit value (`BATTERY_READ_CMD` / `BATTERY_VALUE_OFFSET` in
-    `core/devices.py`) is a best guess until validated against the live headset.
-    Run `dev_probes/probe_battery.py` to confirm the framing and, if needed, fix
-    only those constants. See [Development](../development.md#verification-gates).
+!!! success "Verified against the live headset"
+    The read is **confirmed working** (reads 82% correctly on a Virtuoso XT),
+    validated against the user's own SignalRGB plugin
+    [`Corsair_Headset_Controller.js`](https://github.com/Delido/signalrgb-plugins/blob/main/Corsair_Headset_Controller.js)
+    and live via `dev_probes/probe_battery.py`. The framing in `core/devices.py`:
+
+    - **Command** (command channel, numbered report-id `0x02`):
+      `[0x02, <wireless_mode>, 0x02, 0x0F, 0x00]` — conn byte `0x09` wireless /
+      `0x08` wired, read-opcode `0x02`, battery propID `0x0F`.
+    - **Response selection** is the subtle part: the headset constantly spams
+      notifications with `byte[2] == 0x06`; the real read response has
+      `byte[2] == 0x02`. The read listens for ~1 s and picks that report.
+    - **Value** = `bytes[4..6]` little-endian ÷ 10 (`0x0334` = 820 → 82.0 %).
+
+    HID IN reports broadcast to all readers, so this works even while SignalRGB
+    is open and polling the same headset.
 
 ## Troubleshooting
 
 - **No battery shown** — log shows
   `battery: no battery-capable headset (inactive)`: the selected headset either
   isn't present or isn't flagged `supports_battery` in the registry.
-- **Wrong percentage** — almost certainly the response-offset gate above; run
-  the probe.
+- **Wrong percentage** — re-run `dev_probes/probe_battery.py`; if your headset
+  model differs, the `byte[2] == 0x02` response or value offset may need
+  adjusting for that firmware.
