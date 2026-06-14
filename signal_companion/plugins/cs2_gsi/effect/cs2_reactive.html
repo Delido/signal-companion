@@ -1,13 +1,8 @@
 <head>
   <title>CS2 Reactive (SignalCompanion)</title>
-  <meta description="Counter-Strike 2 reactive lighting via the SignalCompanion GSI bridge: team base glow, HP gradient, low-HP pulse, kill flash, flashbang white-out, smoke and molotov tints, an accelerating bomb tick, explosion and defuse flashes." />
+  <meta description="Counter-Strike 2 reactive lighting via the SignalCompanion HTTPS bridge: team base glow, HP gradient, low-HP pulse, kill flash, flashbang white-out, smoke and molotov tints, accelerating bomb tick, explosion and defuse flashes." />
   <meta publisher="SignalCompanion" />
   <meta property="brightness" label="Brightness" type="number" min="0" max="100" default="100" />
-  <meta property="lowHpPulse" label="Low-HP pulse" type="boolean" default="1" />
-  <meta property="killFlash" label="Kill flash" type="boolean" default="1" />
-  <meta property="flashEffect" label="Flashbang white-out" type="boolean" default="1" />
-  <meta property="smokeBurn" label="Smoke and molotov tints" type="boolean" default="1" />
-  <meta property="bombAlarm" label="Bomb timer and explosion" type="boolean" default="1" />
 </head>
 
 <body style="margin: 0; padding: 0; background: black">
@@ -15,171 +10,138 @@
 </body>
 
 <script>
-  // Built to SignalRGB's own effect pattern (see Solid Color / Rainbow): grab
-  // the canvas and start requestAnimationFrame at the TOP LEVEL. SignalRGB does
-  // NOT call onEngineReady() in current builds, so an effect that only starts
-  // there activates but never renders (black canvas).
+  // Reliable build. Lessons baked in: top-level start (SignalRGB doesn't call
+  // onEngineReady), POST polling over the HTTPS bridge (GET gets cached/frozen),
+  // NaN-safe colours (a stray NaN once froze everything to black), and a VER
+  // marker in the readout so we can always tell which build SignalRGB loaded
+  // (it caches the effect HTML hard — only a full restart reloads it).
+  var VER = "v1.2";
   var c = document.getElementById("exCanvas");
   var ctx = c.getContext("2d");
-  var width = 320, height = 200;
-
-  // Properties are injected as globals of the meta-property name. Read defensively
-  // so plain-browser preview still works; booleans arrive as 1/0.
-  function prop(name, def) {
-    try { var v = window[name]; return (v === undefined || v === null) ? def : v; }
-    catch (e) { return def; }
-  }
-  function flag(name) { return !!Number(prop(name, 1)); }
+  var W = 320, H = 200;
 
   var state = { connected: false };
-  var lastFetch = 0;
-  var lastTeam = null;
-  var prevRoundKills = null;
-  var killFlashUntil = -1;
-  var prevBomb = null;
-  var bombPlantedAt = -1;
-  var explosionUntil = -1;
-  var defuseUntil = -1;
-  var disp = [12, 12, 16];
+  var okCount = 0, errCount = 0, lastOk = -99999, fetching = false, lastPoll = 0;
+  var lastTeam = null, prevBomb = null, prevKills = null;
+  var bombAt = -1, explodeUntil = -1, defuseUntil = -1, killUntil = -1;
+  var disp = [10, 10, 12];
 
-  function applyState(s) {
-    state = (s && typeof s === "object") ? s : { connected: false };
+  function num(v, d) { v = +v; return isFinite(v) ? v : d; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function teamCol(team) {
+    if (team === "T") return [210, 160, 0];      // amber/yellow
+    if (team === "CT") return [0, 70, 205];       // blue
+    return [0, 110, 170];                          // neutral cyan
   }
 
   function poll() {
-    // SignalRGB's sandbox blocks network fetch (http/localhost), but an effect
-    // CAN read a file that sits next to it. SignalCompanion writes the latest
-    // game state to cs2_state.json in the SignalRGB Effects folder; we read it
-    // with a relative URL.
-    // SignalCompanion serves the state over HTTPS on localhost. http/localhost
-    // is mixed-content blocked from this https effect origin, and a public->
-    // private fetch is Private-Network gated; the companion's TLS bridge solves
-    // both (cert trusted via Ultralight's cacert.pem + PNA header). Needs a
-    // SignalRGB restart once after SignalCompanion first patches the cert.
+    if (fetching) return;
+    fetching = true;
+    var done = false;
+    function fin() { if (!done) { done = true; fetching = false; } }
     try {
-      fetch("https://127.0.0.1:3443/state", { cache: "no-store" })
+      var ctrl = (typeof AbortController === "function") ? new AbortController() : null;
+      var opts = { method: "POST", body: "1", cache: "no-store" };
+      if (ctrl) opts.signal = ctrl.signal;
+      var timer = setTimeout(function () { errCount++; if (ctrl) { try { ctrl.abort(); } catch (e) {} } fin(); }, 800);
+      fetch("https://127.0.0.1:3443/state", opts)
         .then(function (r) { return r.json(); })
-        .then(applyState)
-        .catch(function () { /* bridge down / not yet trusted → stay idle */ });
-    } catch (e) {}
+        .then(function (s) { clearTimeout(timer); if (s && typeof s === "object") { state = s; okCount++; lastOk = Date.now(); } fin(); })
+        .catch(function () { clearTimeout(timer); errCount++; fin(); });
+    } catch (e) { errCount++; fin(); }
   }
 
-  function lerp(a, b, t) { return a + (b - a) * t; }
-
-  function teamColor(team) {
-    if (team === "T")  return [210, 160, 0];     // yellow / amber
-    if (team === "CT") return [0, 70, 205];       // blue
-    return [40, 60, 90];
-  }
-
-  function fillRGB(r, g, b) {
+  function fill(r, g, b) {
+    r = num(r, 0); g = num(g, 0); b = num(b, 0);
     r = r < 0 ? 0 : r > 255 ? 255 : r;
     g = g < 0 ? 0 : g > 255 ? 255 : g;
     b = b < 0 ? 0 : b > 255 ? 255 : b;
     ctx.fillStyle = "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")";
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, W, H);
   }
 
-  function computeTarget(now) {
-    if (now < explosionUntil) {
-      var e = (explosionUntil - now) / 700;
-      return { c: [255, lerp(60, 235, e), lerp(0, 150, e)], speed: 0.85 };
-    }
+  // Returns the target colour [r,g,b] for the current state.
+  function target(now) {
+    var p = (Math.sin(now / 600) + 1) / 2;
 
-    if (!state.connected) {
-      var p = (Math.sin(now / 1400) + 1) / 2;
-      var bcol = lastTeam ? teamColor(lastTeam) : [40, 60, 90];
-      var s = 0.16 + 0.20 * p;
-      return { c: [bcol[0] * s, bcol[1] * s, bcol[2] * s + 8], speed: 0.08 };
+    if (okCount === 0) return [110 + 130 * p, 0, 0];          // never reached bridge
+    if (now - lastOk > 2500) return [210, 70 + 90 * p, 0];    // bridge went away
+    if (now < explodeUntil) {                                 // explosion
+      var e = (explodeUntil - now) / 700;
+      return [255, lerp(60, 235, e), lerp(0, 150, e)];
+    }
+    if (now < defuseUntil) {                                  // defuse
+      var d = (defuseUntil - now) / 600;
+      return [lerp(20, 0, d), lerp(40, 255, d), lerp(40, 80, d)];
+    }
+    if (now < killUntil) return [255, 255, 255];              // kill flash
+
+    if (!state || !state.connected) {                         // idle: bridge ok, no match
+      var bc = lastTeam ? teamCol(lastTeam) : [0, 110, 170];
+      var s = 0.45 + 0.45 * p;
+      return [bc[0] * s, bc[1] * s, bc[2] * s];
     }
 
     lastTeam = state.team || lastTeam;
-    var hp = (state.health == null) ? 100 : state.health;
+    var hp = (state.health == null) ? 100 : num(state.health, 100);
     var alive = hp > 0 && state.activity !== "menu";
-    var phase = state.round_phase;
-    var t, speed;
+    var col;
 
-    if (flag("bombAlarm") && state.bomb === "planted") {
-      var elapsed = bombPlantedAt >= 0 ? (now - bombPlantedAt) / 1000 : 0;
-      var frac = Math.max(0, Math.min(1, elapsed / 40));
-      var rate = lerp(0.006, 0.05, frac);
-      var pb = (Math.sin(now * rate) + 1) / 2;
-      t = [lerp(90, 255, pb), lerp(20, 0, frac) * pb, 0];
-      speed = 0.6;
-    } else if (!alive) {
-      var d = teamColor(state.team);
-      t = [d[0] * 0.22 + 6, d[1] * 0.22 + 6, d[2] * 0.22 + 10];
-      speed = 0.1;
-    } else if (phase === "freezetime") {
-      var fz = teamColor(state.team);
-      t = [fz[0] * 0.85, fz[1] * 0.85, fz[2] * 0.85];
-      speed = 0.12;
+    if (state.bomb === "planted") {                          // accelerating red tick
+      var frac = bombAt >= 0 ? Math.min(1, (now - bombAt) / 40000) : 0;
+      var bp = (Math.sin(now / lerp(380, 90, frac)) + 1) / 2;
+      col = [lerp(90, 255, bp), 0, 0];
+    } else if (!alive) {                                     // dead → dim team
+      var dc = teamCol(state.team);
+      col = [dc[0] * 0.22 + 6, dc[1] * 0.22 + 6, dc[2] * 0.22 + 10];
+    } else if (state.round_phase === "freezetime") {        // round start → team glow
+      var fz = teamCol(state.team);
+      col = [fz[0] * 0.85, fz[1] * 0.85, fz[2] * 0.85];
     } else {
-      var k = Math.max(0, Math.min(1, hp / 100));
-      t = [lerp(220, 30, k), lerp(30, 200, k), 30];
-      if (flag("lowHpPulse") && hp <= 35) {
-        var pl = (Math.sin(now / 170) + 1) / 2, amt = pl * (1 - hp / 35);
-        t = [lerp(t[0], 255, amt), lerp(t[1], 0, amt), 0]; speed = 0.4;
-      }
-      if (flag("smokeBurn") && state.burning) {
-        var bf = (Math.sin(now / 55) + 1) / 2;
-        t = [lerp(t[0], 255, 0.6), lerp(t[1], 100 + 70 * bf, 0.6), 0]; speed = 0.5;
-      }
-      if (flag("smokeBurn") && state.smoked) {
-        var avg = (t[0] + t[1] + t[2]) / 3;
-        t = [lerp(t[0], avg, 0.6), lerp(t[1], avg, 0.6), lerp(t[2], avg, 0.6)];
-      }
+      var k = hp / 100; if (k < 0) k = 0; if (k > 1) k = 1;  // HP gradient
+      col = [lerp(220, 30, k), lerp(30, 200, k), 30];
+      if (hp <= 35) { var lp = p * (1 - hp / 35); col = [lerp(col[0], 255, lp), lerp(col[1], 0, lp), 0]; }
+      if (num(state.burning, 0) > 0) { var bf = (Math.sin(now / 55) + 1) / 2; col = [lerp(col[0], 255, 0.6), lerp(col[1], 100 + 70 * bf, 0.6), 0]; }
+      if (num(state.smoked, 0) > 0) { var av = (col[0] + col[1] + col[2]) / 3; col = [lerp(col[0], av, 0.6), lerp(col[1], av, 0.6), lerp(col[2], av, 0.6)]; }
     }
-    if (!t) { t = [20, 20, 24]; speed = 0.12; }
 
-    if (flag("flashEffect")) {
-      var fl = (state.flashed || 0) / 255;
-      if (fl > 0.02) {
-        t = [lerp(t[0], 255, fl), lerp(t[1], 255, fl), lerp(t[2], 255, fl)];
-        speed = Math.max(speed, 0.6);
-      }
-    }
-    return { c: t, speed: speed };
+    var fl = num(state.flashed, 0) / 255;                    // flashbang white-out
+    if (fl > 0.02) col = [lerp(col[0], 255, fl), lerp(col[1], 255, fl), lerp(col[2], 255, fl)];
+    return col;
   }
 
   function update() {
     var now = Date.now();
     try {
-      if (state.bomb === "planted") { if (bombPlantedAt < 0) bombPlantedAt = now; }
-      else { bombPlantedAt = -1; }
-      if (state.bomb === "exploded" && prevBomb !== "exploded") explosionUntil = now + 700;
-      if (state.bomb === "defused"  && prevBomb !== "defused")  defuseUntil   = now + 600;
-      prevBomb = state.bomb;
+      // event edges
+      if (state && state.bomb === "planted") { if (bombAt < 0) bombAt = now; } else { bombAt = -1; }
+      if (state && state.bomb === "exploded" && prevBomb !== "exploded") explodeUntil = now + 700;
+      if (state && state.bomb === "defused" && prevBomb !== "defused") defuseUntil = now + 600;
+      prevBomb = state ? state.bomb : null;
+      if (state && state.connected && prevKills != null && state.round_kills != null && state.round_kills > prevKills) killUntil = now + 300;
+      prevKills = state ? state.round_kills : null;
 
-      if (flag("killFlash") && state.connected && prevRoundKills != null &&
-          state.round_kills != null && state.round_kills > prevRoundKills) {
-        killFlashUntil = now + 300;
-      }
-      prevRoundKills = state.round_kills;
+      var t = target(now);
+      var sp = 0.25;                                          // light smoothing
+      if (!isFinite(disp[0])) disp[0] = num(t[0], 0);
+      if (!isFinite(disp[1])) disp[1] = num(t[1], 0);
+      if (!isFinite(disp[2])) disp[2] = num(t[2], 0);
+      disp[0] = lerp(disp[0], num(t[0], 0), sp);
+      disp[1] = lerp(disp[1], num(t[1], 0), sp);
+      disp[2] = lerp(disp[2], num(t[2], 0), sp);
 
-      var bright = prop("brightness", 100) / 100;
-      var tgt = computeTarget(now);
-      var t = tgt.c, speed = tgt.speed;
+      var br = num(window.brightness, 100) / 100; if (br < 0 || !isFinite(br)) br = 1;
+      fill(disp[0] * br, disp[1] * br, disp[2] * br);
 
-      if (now < defuseUntil) {
-        var df = (defuseUntil - now) / 600;
-        t = [lerp(t[0], 0, df), lerp(t[1], 255, df), lerp(t[2], 70, df)]; speed = 0.6;
-      }
-      if (now < killFlashUntil) {
-        var kf = (killFlashUntil - now) / 300;
-        t = [lerp(t[0], 255, kf), lerp(t[1], 255, kf), lerp(t[2], 255, kf)]; speed = 0.7;
-      }
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.font = "9px monospace";
+      ctx.fillText(VER + " ok:" + okCount + " err:" + errCount + " hp:" + (state && state.health), 3, H - 5);
+    } catch (e) {}
 
-      disp[0] = lerp(disp[0], t[0], speed);
-      disp[1] = lerp(disp[1], t[1], speed);
-      disp[2] = lerp(disp[2], t[2], speed);
-      fillRGB(disp[0] * bright, disp[1] * bright, disp[2] * bright);
-    } catch (e) { /* never let a frame error stop the loop */ }
-
-    if (now - lastFetch > 100) { lastFetch = now; poll(); }
+    if (now - lastPoll > 200) { lastPoll = now; poll(); }
     window.requestAnimationFrame(update);
   }
 
-  // Start immediately at top level — this is what actually drives the canvas.
   window.requestAnimationFrame(update);
 </script>

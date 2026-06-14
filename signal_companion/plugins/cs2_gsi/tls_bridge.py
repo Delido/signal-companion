@@ -187,10 +187,26 @@ class HttpsStateServer(threading.Thread):
                 body = json.dumps(get_state()).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
+                # Tell Ultralight never to cache — otherwise it serves the first
+                # /state forever and the effect freezes after one update.
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self._cors()
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            # POST returns the same state. POST responses are never cached, so
+            # the effect uses POST to defeat Ultralight's aggressive GET cache.
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                if length:
+                    try:
+                        self.rfile.read(length)
+                    except Exception:
+                        pass
+                self.do_GET()
 
             def do_OPTIONS(self):
                 self.send_response(204)
