@@ -29,8 +29,11 @@ CS2  ──(GSI POST :3000 http)──▶  SignalCompanion (cs2-gsi plugin)
 - Runs a `ThreadingHTTPServer` on `127.0.0.1:3000` (plain HTTP) that **CS2**
   POSTs Game State to.
 - Accepts CS2's POSTs, validates the auth token, and parses the body into a
-  flat, effect-friendly schema (`health`, `armor`, `flashed`, `bomb`, `team`,
-  `round_phase`, `weapon`, `kills`, `win_team`, …).
+  flat, effect-friendly schema (`health`, `armor`, `flashed`, `bomb`,
+  `bomb_countdown`, `team`, `round_phase`, `weapon`, `kills`, `win_team`, …).
+  The bomb fuse countdown is taken from the GSI `bomb` component when present and
+  otherwise from the `phase_countdowns` block (`phase == "bomb"`), so the effect's
+  bomb tick stays in sync with the real C4 even for a non-spectator client.
 - Runs an **HTTPS bridge** on `127.0.0.1:3443` (`tls_bridge`) that serves the
   latest state on `GET/POST /state` (CORS-open, Private-Network-Access header,
   `Cache-Control: no-store`) — this is what the **effect** reads. On startup it
@@ -92,7 +95,9 @@ e.g.:
   "flashed": 0, "smoked": 0, "burning": 0,
   "round_kills": 0,
   "team": "CT", "activity": "playing",
-  "round_phase": "live", "bomb": null, "win_team": null,
+  "round_phase": "live", "bomb": null,
+  "bomb_countdown": null, "phase_ends_in": "84.6",
+  "win_team": null,
   "map_phase": "live", "round": 4,
   "weapon": "weapon_ak47", "ammo_clip": 30, "ammo_reserve": 90,
   "kills": 7, "deaths": 3

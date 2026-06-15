@@ -52,6 +52,23 @@ def _parse_gsi(payload):
     rnd = payload.get("round") or {}
     mp = payload.get("map") or {}
     stats = player.get("match_stats") or {}
+    bomb = payload.get("bomb") or {}              # CS2 bomb component (state + countdown)
+    pc = payload.get("phase_countdowns") or {}
+
+    # Exact fuse time remaining (seconds) once planted — the only reliable way to
+    # keep the tick in sync with the real C4. bomb.countdown is the cleanest source
+    # but CS2 only sends it to spectator/GOTV clients; for a playing client the
+    # round phase countdown carries it instead (phase=="bomb" → phase_ends_in is
+    # the fuse, phase=="defuse" → defuse time). Prefer bomb.countdown, fall back.
+    def _to_float(v):
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    bomb_cd = _to_float(bomb.get("countdown"))
+    if bomb_cd is None and pc.get("phase") == "bomb":
+        bomb_cd = _to_float(pc.get("phase_ends_in"))
 
     weapon_name, clip, reserve = None, None, None
     for w in (player.get("weapons") or {}).values():
@@ -74,7 +91,11 @@ def _parse_gsi(payload):
         "team": player.get("team"),                # "T" / "CT"
         "activity": player.get("activity"),        # "playing"/"menu"/...
         "round_phase": rnd.get("phase"),           # freezetime/live/over
-        "bomb": rnd.get("bomb"),                   # planted/defused/exploded
+        # bomb component is finer-grained (planting/planted/defusing/defused/
+        # exploded); fall back to round.bomb when the component isn't present.
+        "bomb": bomb.get("state") or rnd.get("bomb"),
+        "bomb_countdown": bomb_cd,                  # seconds left on the fuse, or None
+        "phase_ends_in": pc.get("phase_ends_in"),   # seconds left in current phase
         "win_team": rnd.get("win_team"),           # "T"/"CT" when round is over
         "map_phase": mp.get("phase"),
         "round": mp.get("round"),

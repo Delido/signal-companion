@@ -15,4 +15,4 @@ for the plugin contract and plugins/ for the bundled plugins.
 import sys as _sys
 _sys.coinit_flags = 0  # 0 = COINIT_MULTITHREADED (MTA)
 
-__version__ = "2.2.2"
+__version__ = "2.3.0"

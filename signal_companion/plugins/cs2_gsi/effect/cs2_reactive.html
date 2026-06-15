@@ -23,7 +23,7 @@
 </body>
 
 <script>
-  var VER = "v2.3";
+  var VER = "v2.4";
   var c = document.getElementById("exCanvas");
   var ctx = c.getContext("2d");
   var W = 320, H = 200, CX = 160, CY = 100, MAXR = 200;
@@ -33,6 +33,9 @@
   var lastNow = 0, lastTeam = null;
   var prevBomb = null, prevKills = null, prevPhase = null, wasDead = false;
   var bombAt = -1, bombPhase = 0, deathAt = -1;
+  // Fuse clock: cdBase is the last real countdown from GSI, stamped at cdStamp,
+  // so we can extrapolate a smooth remaining time at 60fps between ~20Hz updates.
+  var cdBase = -1, cdStamp = 0, lastCdRaw = -1;
   var explodeUntil = -1, defuseUntil = -1, killUntil = -1, winUntil = -1, lossUntil = -1;
 
   function num(v, d) { v = +v; return isFinite(v) ? v : d; }
@@ -158,10 +161,19 @@
     if (flag("smokeFx") && num(state.burning, 0) > 0) { var bf = (Math.sin(now / 50) + 1) / 2; overlay("rgba(255," + (90 + 80 * bf | 0) + ",0,0.45)"); }
     if (alive && hp <= 35 && flag("lowHpPulse") && !useBar) edgePulse("255,0,0", clamp((1 - hp / 35), 0, 1) * (0.4 + 0.5 * p));
 
-    // ── bomb tick (synced to the ~40 s C4 fuse) ──
-    if (state.bomb === "planted" && bombAt >= 0 && flag("bombFx")) {
-      var el = (now - bombAt) / 1000, frac = clamp(el / 40, 0, 1);
-      bombPhase += (dt / 1000) * lerp(1.0, 9.0, frac);
+    // ── bomb tick (synced to the real C4 fuse) ──
+    if (state.bomb === "planted" && flag("bombFx")) {
+      // Remaining fuse seconds: prefer the real GSI countdown (extrapolated
+      // smoothly), else estimate from when we first saw the plant.
+      var rem;
+      if (cdBase >= 0) rem = cdBase - (now - cdStamp) / 1000;
+      else if (bombAt >= 0) rem = 40 - (now - bombAt) / 1000;
+      else rem = 40;
+      rem = clamp(rem, 0, 40);
+      // Beep period shrinks as the fuse runs down (≈1 Hz at 40s → ~8 Hz at 0s),
+      // so the blink accelerates in time with the actual detonation.
+      var period = clamp(0.12 + (rem / 40) * 0.88, 0.12, 1.0);
+      bombPhase += (dt / 1000) / period;
       var on = (bombPhase % 1) < 0.4;
       edgePulse("255,0,0", on ? 0.9 : 0.18);
       if (on) overlay("rgba(255,0,0,0.12)");
@@ -193,7 +205,13 @@
       if (!isDead) deathAt = -1;
       wasDead = isDead;
 
-      if (connected && state.bomb === "planted") { if (bombAt < 0) { bombAt = now; bombPhase = 0; } } else { bombAt = -1; }
+      if (connected && state.bomb === "planted") {
+        if (bombAt < 0) { bombAt = now; bombPhase = 0; }
+        // Re-stamp the fuse clock whenever a fresh countdown value arrives so the
+        // 60fps extrapolation stays locked to CS2's real remaining time.
+        var raw = num(state.bomb_countdown, -1);
+        if (raw >= 0 && raw !== lastCdRaw) { lastCdRaw = raw; cdBase = raw; cdStamp = now; }
+      } else { bombAt = -1; cdBase = -1; lastCdRaw = -1; }
       if (connected && state.bomb === "exploded" && prevBomb !== "exploded") explodeUntil = now + 900;
       if (connected && state.bomb === "defused" && prevBomb !== "defused") defuseUntil = now + 600;
       prevBomb = connected ? state.bomb : null;

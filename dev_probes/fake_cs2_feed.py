@@ -35,12 +35,15 @@ def fake_state():
     other = "T" if team == "CT" else "CT"
     s = {"connected": True, "ts": time.time(), "team": team, "activity": "playing",
          "round_phase": "live", "health": 100, "armor": 100, "flashed": 0,
-         "smoked": 0, "burning": 0, "bomb": None, "round_kills": 0,
-         "win_team": None, "phase": phase}
+         "smoked": 0, "burning": 0, "bomb": None, "bomb_countdown": None,
+         "round_kills": 0, "win_team": None, "phase": phase}
     if phase == "low_hp":
         s["health"] = 15
     elif phase == "bomb":
         s["bomb"] = "planted"
+        # Compress the real 40s fuse into the segment so the tick acceleration is
+        # visible end-to-end; the effect drives its blink off this countdown.
+        s["bomb_countdown"] = round(40.0 * max(0.0, 1.0 - seg_t / seg_len), 2)
     elif phase == "explode":                    # alternate explosion / defuse
         s["bomb"] = "exploded" if loop % 2 == 0 else "defused"
         s["phase"] = "explode" if loop % 2 == 0 else "defuse"

@@ -66,12 +66,12 @@ def locate_cs2_cfg_dir():
 
 def _cfg_contents(port, token):
     return (
-        '"SignalCompanion CS2 Integration v1.0"\n'
+        '"SignalCompanion CS2 Integration v1.1"\n'
         "{\n"
         f'    "uri"       "http://127.0.0.1:{port}"\n'
         '    "timeout"   "5.0"\n'
-        '    "buffer"    "0.1"\n'
-        '    "throttle"  "0.1"\n'
+        '    "buffer"    "0.0"\n'
+        '    "throttle"  "0.05"\n'
         '    "heartbeat" "10.0"\n'
         '    "auth"\n'
         "    {\n"
@@ -86,6 +86,8 @@ def _cfg_contents(port, token):
         '        "player_state"        "1"\n'
         '        "player_weapons"      "1"\n'
         '        "player_match_stats"  "1"\n'
+        '        "bomb"                "1"\n'
+        '        "phase_countdowns"    "1"\n'
         "    }\n"
         "}\n"
     )
