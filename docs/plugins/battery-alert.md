@@ -27,7 +27,8 @@ SignalRGB and iCUE without conflict.
 | Headset | Auto-detect | Must be a battery-capable [supported headset](../devices.md). |
 | Alert threshold (%) | 20 | 1–99. |
 | Poll interval (seconds) | 60.0 | Minimum 15 s. |
-| Re-alert every (minutes) | 30.0 | `0` = alert once per crossing only. |
+| Re-checks before alerting | 2 | Extra re-reads (spread across ~1 min) that must *all* read below threshold before the sound plays. |
+| Re-alert every (minutes) | 5.0 | `0` = alert once per crossing only. |
 | Sound (.wav) | *(empty)* | Empty = the bundled low-battery chime. Browse to pick your own `.wav`; **Test** previews it. |
 
 The bundled chime is a short descending three-tone motif
@@ -43,18 +44,24 @@ Windows system beep.
   "device": "auto",
   "threshold": 20,
   "poll_interval_seconds": 60.0,
-  "re_alert_minutes": 30.0,
+  "confirm_samples": 2,
+  "re_alert_minutes": 5.0,
   "sound_path": ""
 }
 ```
 
-## Hysteresis & re-alerts
+## Confirmation, hysteresis & re-alerts
 
-- The "below threshold" latch only clears once the level climbs **more than 5
-  points** above the threshold (i.e. you actually started charging). This stops
-  flapping when the reading sits right on the line.
-- While below threshold, the alert repeats every `re_alert_minutes`. Set it to
-  `0` to alert only once each time you cross down.
+- **0 % / failed reads are treated as "couldn't read", not as empty.** The
+  headset intermittently returns 0 % when the value can't be sampled (waking from
+  standby, noisy response window), so a single low/zero reading never alerts on
+  its own.
+- On a suspect reading the poller **re-checks `confirm_samples` more times**
+  (spread across ~1 minute) and only plays the sound if **every** valid re-read
+  is really below the threshold — a re-read that comes back healthy cancels it.
+- While confirmed-below, the alert repeats every `re_alert_minutes` (default
+  5 min). Set it to `0` to alert only once per crossing. The "below" latch
+  clears once a reading comes back above the threshold (charging).
 
 ## Battery read framing (resolved)
 

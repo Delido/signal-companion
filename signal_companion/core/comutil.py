@@ -13,7 +13,12 @@ thread is safe. `init_com_mta()` is called on the main thread at startup and at
 the entry of every worker thread we spawn (even HID-only ones, because the GC
 that frees a COM object can run on any thread that allocates).
 """
+import sys
 import threading
+
+# Must precede `import comtypes`: selects the MTA apartment for comtypes' own
+# per-thread COM machinery (see signal_companion/__init__.py for the full why).
+sys.coinit_flags = 0  # 0 = COINIT_MULTITHREADED (MTA)
 
 import comtypes
 

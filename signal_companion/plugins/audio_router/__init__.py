@@ -20,6 +20,7 @@ actual device-switching lives in winaudio.py (undocumented IPolicyConfig).
 import json
 import logging
 import os
+import queue
 import sys
 import threading
 import urllib.parse
@@ -167,38 +168,94 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, "current": dev})
 
 
-class _Controller:
-    """Binds the pure rotation helpers to the plugin's live config + tray."""
+class _AudioWorker(threading.Thread):
+    """Single, long-lived MTA thread that performs ALL audio COM work.
 
-    def __init__(self, get_config, on_change):
+    The HTTP server handles each request on its own (ephemeral) thread; if those
+    threads created/released comtypes/pycaw COM objects concurrently, the churn
+    corrupted COM object lifetimes and crashed the process natively during GC
+    (comtypes Release → access violation, seen in fault.log). Funnelling every
+    COM call through one persistent thread removes that concurrency entirely, and
+    a gc.collect() after each job finalizes any comtypes cycles here, on this
+    COM-initialized thread, rather than later on some unrelated thread."""
+
+    def __init__(self):
+        super().__init__(daemon=True, name="AudioWorker")
+        self._q = queue.Queue()
+        self._stop = threading.Event()
+
+    def submit(self, fn, timeout=10.0):
+        """Run fn() on the audio thread and return its result (blocking)."""
+        if self._stop.is_set() or not self.is_alive():
+            return fn()  # fallback: run inline (e.g. during shutdown)
+        box = {}
+        done = threading.Event()
+        self._q.put((fn, box, done))
+        if not done.wait(timeout):
+            raise TimeoutError("audio worker timed out")
+        if "exc" in box:
+            raise box["exc"]
+        return box.get("value")
+
+    def run(self):
+        ensure_com_initialized()
+        while not self._stop.is_set():
+            try:
+                fn, box, done = self._q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                box["value"] = fn()
+            except Exception as e:  # noqa: BLE001 — propagated to the caller
+                box["exc"] = e
+            finally:
+                done.set()
+
+    def stop(self):
+        self._stop.set()
+
+
+class _Controller:
+    """Binds the pure rotation helpers to the plugin's live config + tray, and
+    runs every COM operation on the single audio worker thread."""
+
+    def __init__(self, get_config, on_change, worker):
         self.get_config = get_config
         self.on_change = on_change
+        self.worker = worker
 
     def _configured(self):
         return list(self.get_config().get("devices") or [])
 
     def rotate(self, direction):
-        dev, err = rotate(direction, self._configured())
+        configured = self._configured()
+        dev, err = self.worker.submit(lambda: rotate(direction, configured))
         if dev and not err:
             self.on_change(dev)
         return dev, err
 
     def set_target(self, params):
-        dev, err = set_target(params, self._configured())
+        configured = self._configured()
+        dev, err = self.worker.submit(lambda: set_target(params, configured))
         if dev and not err:
             self.on_change(dev)
         return dev, err
 
     def current(self):
-        active = winaudio.list_render_devices()
-        return next((d for d in active if d["default"]), None)
+        def _work():
+            active = winaudio.list_render_devices()
+            return next((d for d in active if d["default"]), None)
+        return self.worker.submit(_work)
 
     def devices(self):
-        active = winaudio.list_render_devices()
         configured = self._configured()
-        for d in active:
-            d["in_rotation"] = d["id"] in configured
-        return active
+
+        def _work():
+            active = winaudio.list_render_devices()
+            for d in active:
+                d["in_rotation"] = d["id"] in configured
+            return active
+        return self.worker.submit(_work)
 
 
 class _Server(threading.Thread):
@@ -243,6 +300,7 @@ class AudioRouterPlugin(Plugin):
         self.ctx = None
         self.server = None
         self.controller = None
+        self.worker = None
 
     def default_config(self):
         return {
@@ -259,7 +317,9 @@ class AudioRouterPlugin(Plugin):
         if not cfg.get("enabled", True):
             ctx.log.info("disabled")
             return
-        self.controller = _Controller(ctx.config, self._on_change)
+        self.worker = _AudioWorker()
+        self.worker.start()
+        self.controller = _Controller(ctx.config, self._on_change, self.worker)
         self.server = _Server(cfg.get("host", "127.0.0.1"), int(cfg.get("port", 3010)),
                               self.controller)
         self.server.start()
@@ -274,6 +334,8 @@ class AudioRouterPlugin(Plugin):
     def stop(self):
         if self.server:
             self.server.stop()
+        if self.worker:
+            self.worker.stop()
 
     def _on_change(self, dev, switched=True):
         if not self.ctx:

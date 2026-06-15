@@ -43,7 +43,7 @@ class BatteryPoller(threading.Thread):
         self.get_config = get_config
         self.ctx = ctx
         self._stop = threading.Event()
-        self._below = False          # currently below threshold (hysteresis)
+        self._below = False          # currently in a confirmed-low state
         self._last_alert = 0.0
         self._last_level = None
 
@@ -62,37 +62,75 @@ class BatteryPoller(threading.Thread):
                 self._tick(cfg)
             self._stop.wait(interval)
 
-    def _tick(self, cfg):
+    def _read_level(self):
+        """A *trustworthy* reading, or None. The headset intermittently reports
+        0% when the value can't actually be read (waking from standby, noisy
+        response window); treat 0 like a failed read so it never alerts on its
+        own."""
         level = self.ctx.devices.read_battery(self.spec)
-        if level is None:
+        return level if (level is not None and level > 0) else None
+
+    def _publish(self, level, threshold):
+        if level == self._last_level:
             return
-        if level != self._last_level:
-            self._last_level = level
-            self.ctx.events.publish("headset.battery", level)
-            self.ctx.set_status({
-                "label": f"Battery: {level}%",
-                "color": (220, 50, 50) if level <= cfg.get("threshold", 20) else (90, 160, 90),
-            })
-            self.ctx.log.info(f"battery {level}%")
+        self._last_level = level
+        self.ctx.events.publish("headset.battery", level)
+        self.ctx.set_status({
+            "label": f"Battery: {level}%",
+            "color": (220, 50, 50) if level <= threshold else (90, 160, 90),
+        })
+        self.ctx.log.info(f"battery {level}%")
 
+    def _tick(self, cfg):
         threshold = int(cfg.get("threshold", 20))
-        # Hysteresis: clear the "below" latch only once we climb a few points
-        # back above the threshold (e.g. plugged in to charge).
-        if level > threshold + 5:
-            self._below = False
+        level = self._read_level()
+        if level is not None:
+            self._publish(level, threshold)
+            if level > threshold:
+                self._below = False      # healthy reading clears the latch
+                return
+        # Either a failed/0 read or a valid reading at/under threshold — don't
+        # trust a single sample. Re-check a couple more times within the minute
+        # and only alert if EVERY valid reading is really below the threshold.
+        confirmed = self._confirm_low(cfg, threshold)
+        if confirmed is None:
+            self.ctx.log.info("battery: low/failed read could not be confirmed "
+                              "(no valid re-reads) — will retry next poll")
+        elif confirmed:
+            self._maybe_alert(cfg, threshold)
+        else:
+            self._below = False          # a re-read came back healthy
 
-        if level <= threshold:
-            re_alert = max(0.0, float(cfg.get("re_alert_minutes", 30.0))) * 60.0
-            now = time.monotonic()
-            first_crossing = not self._below
-            due_again = re_alert > 0 and (now - self._last_alert) >= re_alert
-            if first_crossing or due_again:
-                self._below = True
-                self._last_alert = now
-                self.ctx.log.info(f"battery low ({level}% ≤ {threshold}%) → alert")
-                # Empty path → bundled battery chime; system beep only if that's
-                # somehow missing too.
-                self.ctx.play_sound(cfg.get("sound_path") or default_sound_path() or None)
+    def _confirm_low(self, cfg, threshold):
+        """Re-read `confirm_samples` times spread across the next ~minute.
+        Returns True if every valid re-read is ≤ threshold, False if any valid
+        re-read is above it, or None if no valid reading could be obtained."""
+        n = max(1, int(cfg.get("confirm_samples", 2)))
+        spacing = 60.0 / (n + 1)
+        valid = []
+        for _ in range(n):
+            if self._stop.wait(spacing):
+                break
+            level = self._read_level()
+            if level is not None:
+                valid.append(level)
+                self._publish(level, threshold)
+        if not valid:
+            return None
+        return all(v <= threshold for v in valid)
+
+    def _maybe_alert(self, cfg, threshold):
+        re_alert = max(0.0, float(cfg.get("re_alert_minutes", 5.0))) * 60.0
+        now = time.monotonic()
+        first_crossing = not self._below
+        due_again = re_alert > 0 and (now - self._last_alert) >= re_alert
+        if first_crossing or due_again:
+            self._below = True
+            self._last_alert = now
+            self.ctx.log.info(f"battery low confirmed (≤ {threshold}%) → alert")
+            # Empty path → bundled battery chime; system beep only if that's
+            # somehow missing too.
+            self.ctx.play_sound(cfg.get("sound_path") or default_sound_path() or None)
 
 
 class BatteryAlertPlugin(Plugin):
@@ -110,7 +148,8 @@ class BatteryAlertPlugin(Plugin):
             "device": "auto",
             "threshold": 20,                 # percent
             "poll_interval_seconds": 60.0,
-            "re_alert_minutes": 30.0,        # 0 = alert once per crossing only
+            "confirm_samples": 2,            # extra re-reads before trusting a low/0
+            "re_alert_minutes": 5.0,         # 0 = alert once per crossing only
             "sound_path": "",                # empty → Windows default beep
         }
 
@@ -161,10 +200,17 @@ class BatteryAlertPlugin(Plugin):
         ttk.Entry(poll_row, textvariable=interval, width=8).pack(side=tk.LEFT, padx=6)
         vars["interval"] = interval
 
+        confirm_row = ttk.Frame(parent)
+        confirm_row.pack(fill=tk.X, pady=4)
+        ttk.Label(confirm_row, text="Re-checks before alerting:").pack(side=tk.LEFT)
+        confirm = tk.IntVar(value=int(cfg.get("confirm_samples", 2)))
+        ttk.Spinbox(confirm_row, from_=1, to=5, textvariable=confirm, width=6).pack(side=tk.LEFT, padx=6)
+        vars["confirm"] = confirm
+
         re_row = ttk.Frame(parent)
         re_row.pack(fill=tk.X, pady=4)
         ttk.Label(re_row, text="Re-alert every (minutes, 0 = once):").pack(side=tk.LEFT)
-        re_alert = tk.StringVar(value=str(cfg.get("re_alert_minutes", 30.0)))
+        re_alert = tk.StringVar(value=str(cfg.get("re_alert_minutes", 5.0)))
         ttk.Entry(re_row, textvariable=re_alert, width=8).pack(side=tk.LEFT, padx=6)
         vars["re_alert"] = re_alert
 
@@ -190,7 +236,9 @@ class BatteryAlertPlugin(Plugin):
         vars["sound_path"] = sound_path
 
         ttk.Label(parent, text=("Battery is read directly from the headset over USB; works "
-                                "alongside SignalRGB and iCUE without conflict."),
+                                "alongside SignalRGB and iCUE without conflict. A 0% / failed "
+                                "read is treated as 'couldn't read' and re-checked — the alert "
+                                "only fires when every re-read is really below the threshold."),
                   foreground="#888", justify="left", wraplength=460).pack(anchor="w", pady=(8, 0))
         return vars
 
@@ -200,6 +248,7 @@ class BatteryAlertPlugin(Plugin):
         cfg["device"] = choice_key_for_label(vars["device_choices"], vars["device_var"].get())
         cfg["threshold"] = int(vars["threshold"].get())
         cfg["sound_path"] = vars["sound_path"].get().strip()
+        cfg["confirm_samples"] = max(1, int(vars["confirm"].get()))
         try:
             cfg["poll_interval_seconds"] = max(15.0, float(vars["interval"].get()))
         except ValueError:
