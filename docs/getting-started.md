@@ -66,9 +66,9 @@ build_installer.bat              # -> installer\Output\SignalCompanion-Setup-<ve
 
 Requires [Inno Setup 6](https://jrsoftware.org/isdl.php)
 (`winget install JRSoftware.InnoSetup`) and a prior `build_signalcompanion.bat`
-run. The installer defaults to a **per-user** install (no UAC prompt); you can
-choose an all-users install in the dialog. Your config in
-`%APPDATA%\SignalCompanion` is preserved across reinstalls and uninstalls.
+run. The installer is **machine-wide** (installs to Program Files for all users
+and elevates via UAC). Your config in `%APPDATA%\SignalCompanion` is per-user and
+preserved across reinstalls and uninstalls.
 
 ## Configuration & logs
 

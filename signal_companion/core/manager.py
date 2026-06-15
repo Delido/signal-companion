@@ -48,11 +48,13 @@ def _iter_plugin_module_names(plugins_pkg):
 
 
 class PluginManager:
-    def __init__(self, status_callback=None):
+    def __init__(self, status_callback=None, notify_callback=None):
         """`status_callback(plugin_id, status)` is invoked when a plugin
-        updates its tray status; the tray app supplies it."""
+        updates its tray status; `notify_callback(title, message)` shows a tray
+        toast. Both are supplied by the tray app (None in the settings process)."""
         self.events = EventBus()
         self._status_callback = status_callback or (lambda pid, st: None)
+        self._notify_callback = notify_callback or (lambda title, msg: None)
         self.cfg = config_mod.load_config()
         self.plugins = []          # list[Plugin] in discovery order
         self._contexts = {}        # plugin_id -> PluginContext
@@ -116,6 +118,7 @@ class PluginManager:
                 _get_section=self._section_getter(plugin.id),
                 _set_status=self._on_status,
                 _play_sound=audio.play_sound,
+                _notify=self._notify_callback,
             )
             self._contexts[plugin.id] = ctx
             try:

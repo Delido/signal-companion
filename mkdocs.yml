@@ -70,6 +70,7 @@ nav:
       - Mic Mute Mirror: plugins/mic-mute-mirror.md
       - Mic Drift Logger: plugins/mic-drift.md
       - Battery Alert: plugins/battery-alert.md
+      - Audio Output Switcher: plugins/audio-router.md
       - CS2 Integration: plugins/cs2-integration.md
   - SignalRGB effect: signalrgb-effect.md
   - Devices: devices.md

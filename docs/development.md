@@ -38,10 +38,10 @@ script that packages the onedir folder. Install Inno Setup with
 `winget install JRSoftware.InnoSetup` (the batch checks Program Files **and**
 `%LOCALAPPDATA%\Programs`). Highlights:
 
-- Per-user install by default (`PrivilegesRequired=lowest`, no UAC); all-users
-  selectable in the dialog.
-- Start Menu shortcut, optional Desktop icon, optional "run at Windows startup"
-  (HKCU `Run`), and "launch on finish".
+- Machine-wide install (`PrivilegesRequired=admin`, UAC) into Program Files for
+  all users.
+- Common Start Menu shortcut, optional Desktop icon, optional "run at Windows
+  startup" (HKLM `Run`, all users), and "launch on finish".
 - Closes a running tray instance before install/uninstall so files aren't
   locked.
 - Leaves `%APPDATA%\SignalCompanion` (config + log) in place on uninstall.

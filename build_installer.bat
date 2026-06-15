@@ -27,5 +27,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo Built: %~dp0installer\Output\SignalCompanion-Setup-2.1.1.exe
+echo Built: %~dp0installer\Output\SignalCompanion-Setup-2.2.0.exe
 endlocal

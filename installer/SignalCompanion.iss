@@ -8,7 +8,7 @@
 ; Requires Inno Setup 6: https://jrsoftware.org/isdl.php
 
 #define MyAppName "SignalCompanion"
-#define MyAppVersion "2.1.1"
+#define MyAppVersion "2.2.0"
 #define MyAppPublisher "Sebastian Mendyka"
 #define MyAppURL "https://github.com/Delido/signal-companion"
 #define MyAppExeName "SignalCompanion.exe"
@@ -30,12 +30,11 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-; Default to a per-user install (no UAC prompt): friendlier, Defender-quiet, and
-; the HKCU autostart entry then belongs to the actual user. The user can still
-; choose an all-users install (which elevates) from the dialog. With "lowest",
-; {autopf} resolves to the per-user programs folder (%LOCALAPPDATA%\Programs).
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+; Machine-wide install: requires elevation (UAC) and installs to Program Files
+; for ALL users. {autopf} then resolves to the real Program Files; {group} and
+; {autodesktop} become the common (all-users) Start Menu / Desktop, and the
+; autostart entry goes to HKLM so the tray starts for whoever logs in.
+PrivilegesRequired=admin
 OutputDir=Output
 OutputBaseFilename=SignalCompanion-Setup-{#MyAppVersion}
 SetupIconFile=..\assets\signalcompanion.ico
@@ -68,8 +67,9 @@ Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Registry]
-; Optional autostart for the current user (only if the "startup" task is ticked).
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+; Optional machine-wide autostart (only if the "startup" task is ticked): HKLM
+; Run starts the tray for every user who logs in.
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExeName}"""; \
     Flags: uninsdeletevalue; Tasks: startup
 

@@ -25,4 +25,5 @@ if errorlevel 1 (
 
 echo.
 echo Built: %~dp0dist\SignalCompanion\SignalCompanion.exe
+echo (No-window audio switch = SignalCompanion.exe --audio-switch)
 endlocal

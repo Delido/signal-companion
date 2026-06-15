@@ -9,6 +9,10 @@
 # launch, which Microsoft Defender often flags / rescans. A onedir folder under
 # Program Files is friendlier to Defender and faster to start. The Inno Setup
 # installer (installer/SignalCompanion.iss) packages this folder.
+#
+# UPX is OFF on purpose: UPX-packed executables are a well-known Microsoft
+# Defender / SmartScreen false-positive trigger. Leaving binaries unpacked keeps
+# them a touch larger but markedly less likely to be quarantined.
 
 import os
 import sys
@@ -63,7 +67,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     console=False,
     disable_windowed_traceback=False,
@@ -79,7 +83,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='SignalCompanion',
 )

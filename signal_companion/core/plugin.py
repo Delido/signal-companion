@@ -37,6 +37,7 @@ class PluginContext:
     _set_status: Callable[[str, dict], None]  # (plugin_id, status) -> refresh tray
     _play_sound: Callable[..., bool]
 
+    _notify: Callable[[str, str], None] = None  # (title, message) -> tray toast
     log: logging.Logger = field(default=None)
 
     def __post_init__(self):
@@ -54,6 +55,12 @@ class PluginContext:
 
     def play_sound(self, path=None) -> bool:
         return self._play_sound(path)
+
+    def notify(self, title: str, message: str):
+        """Show a tray notification (Windows toast/balloon). No-op if the tray
+        isn't available (e.g. in the settings process)."""
+        if self._notify:
+            self._notify(title, message)
 
 
 class Plugin:

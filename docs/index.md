@@ -33,6 +33,7 @@ those gaps, while leaving the actual lighting to SignalRGB.
 | [Mic Mute Mirror](plugins/mic-mute-mirror.md) | `mic-mute-mirror` | Bidirectional sync: headset mute button ↔ Windows default mic. |
 | [Mic Drift Logger](plugins/mic-drift.md) | `mic-drift` | Diagnostic logging of unexpected mic volume / registry drift. |
 | [Battery Alert](plugins/battery-alert.md) | `battery-alert` | Plays a sound when the headset battery drops below a threshold. |
+| [Audio Output Switcher](plugins/audio-router.md) | `audio-router` | Local URL endpoint to rotate the default output device (headset ↔ speakers) from a SignalRGB macro. |
 | [CS2 Integration](plugins/cs2-integration.md) | `cs2-gsi` | Receives CS2 Game State and feeds a [SignalRGB effect](signalrgb-effect.md). |
 
 ## How it's built

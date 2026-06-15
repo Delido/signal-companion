@@ -5,4 +5,4 @@ Windows audio, direct HID) via a drop-in plugin system. See core/plugin.py
 for the plugin contract and plugins/ for the bundled plugins.
 """
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
