@@ -15,7 +15,7 @@ from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 import tkinter as tk
 from tkinter import ttk
 
-from signal_companion.core.comutil import ensure_com_initialized
+from signal_companion.core.comutil import com_submit, ensure_com_initialized
 from signal_companion.core.config import LOG_PATH
 from signal_companion.core.plugin import Plugin
 
@@ -67,18 +67,21 @@ class MicDriftLogger(threading.Thread):
         self._stop.set()
 
     def _snapshot(self):
-        ensure_com_initialized()
-        mic = AudioUtilities.GetMicrophone()
-        dev_id = mic.GetId()
-        interface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        vol = cast(interface, POINTER(IAudioEndpointVolume))
-        return {
-            "id": dev_id,
-            "scalar": round(vol.GetMasterVolumeLevelScalar(), 4),
-            "db": round(vol.GetMasterVolumeLevel(), 2),
-            "muted": bool(vol.GetMute()),
-            "reg": _read_device_registry(dev_id),
-        }
+        # All COM on the shared worker thread; registry read is plain winreg.
+        def _com_work():
+            mic = AudioUtilities.GetMicrophone()
+            dev_id = mic.GetId()
+            interface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            vol = cast(interface, POINTER(IAudioEndpointVolume))
+            return {
+                "id": dev_id,
+                "scalar": round(vol.GetMasterVolumeLevelScalar(), 4),
+                "db": round(vol.GetMasterVolumeLevel(), 2),
+                "muted": bool(vol.GetMute()),
+            }
+        snap = com_submit(_com_work)
+        snap["reg"] = _read_device_registry(snap["id"])
+        return snap
 
     def _diff_and_log(self, prev, cur):
         if prev["id"] != cur["id"]:

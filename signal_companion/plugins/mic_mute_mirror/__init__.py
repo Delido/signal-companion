@@ -16,19 +16,24 @@ from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 import tkinter as tk
 from tkinter import ttk
 
-from signal_companion.core.comutil import ensure_com_initialized
+from signal_companion.core.comutil import com_submit, ensure_com_initialized
 from signal_companion.core.plugin import Plugin
 
 
 # ── Windows-side controller ──
 class MicController:
-    """Cached IAudioEndpointVolume on the Windows default microphone."""
+    """Cached IAudioEndpointVolume on the Windows default microphone.
+
+    All COM work runs on the shared COM worker thread (core.comutil.com_submit)
+    so the endpoint object is created, used and finalized only there — never
+    cross-thread (which crashes comtypes natively). `_open` carries no submit of
+    its own; it's only ever called from inside a submitted job."""
 
     def __init__(self):
         self._volume = None
 
     def _open(self):
-        ensure_com_initialized()
+        # Runs on the COM worker (called from within set_mute/get_mute's job).
         try:
             mic = AudioUtilities.GetMicrophone()
             interface = mic.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
@@ -40,26 +45,28 @@ class MicController:
             return False
 
     def set_mute(self, muted: bool) -> bool:
-        ensure_com_initialized()
-        if self._volume is None and not self._open():
-            return False
-        try:
-            self._volume.SetMute(1 if muted else 0, None)
-            return True
-        except Exception:
-            logging.exception("[mic_mute] SetMute failed; will reopen next time")
-            self._volume = None
-            return False
+        def _work():
+            if self._volume is None and not self._open():
+                return False
+            try:
+                self._volume.SetMute(1 if muted else 0, None)
+                return True
+            except Exception:
+                logging.exception("[mic_mute] SetMute failed; will reopen next time")
+                self._volume = None
+                return False
+        return com_submit(_work)
 
     def get_mute(self):
-        ensure_com_initialized()
-        if self._volume is None and not self._open():
-            return None
-        try:
-            return bool(self._volume.GetMute())
-        except Exception:
-            self._volume = None
-            return None
+        def _work():
+            if self._volume is None and not self._open():
+                return None
+            try:
+                return bool(self._volume.GetMute())
+            except Exception:
+                self._volume = None
+                return None
+        return com_submit(_work)
 
 
 # ── Headset event listener ──

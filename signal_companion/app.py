@@ -173,7 +173,7 @@ def main():
     # else. pycaw/comtypes objects get freed by the cyclic GC on arbitrary
     # threads; a uniformly-MTA process makes those cross-thread Releases safe
     # (otherwise the process dies with a native access violation in _ctypes).
-    from signal_companion.core.comutil import ensure_com_initialized
+    from signal_companion.core.comutil import ensure_com_initialized, start_com_worker
     ensure_com_initialized()
 
     config_mod.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -211,6 +211,9 @@ def main():
         return
 
     logging.info("=== SignalCompanion starting ===")
+    # Start the single COM worker (and disable automatic GC) before any plugin
+    # touches COM, so all comtypes work + finalization stays on that one thread.
+    start_com_worker()
     try:
         TrayApp().run()
     except Exception:
